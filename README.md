@@ -12,7 +12,7 @@
 
 # 示例
 
-[![在线示例](https://github.com/hh-hang/cesium-player-controller/blob/master/example/public/imgs/3dtiles.png)](https://hh-hang.github.io/cesium-player-controller/index.html)
+[![在线示例](https://github.com/hh-hang/cesium-player-controller/blob/main/example/public/imgs/3dtiles.png)](https://hh-hang.github.io/cesium-player-controller/index.html)
 
 # 安装
 

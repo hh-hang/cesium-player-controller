@@ -12,7 +12,7 @@ An out-of-the-box player controller for CesiumJS, providing character capsule co
 
 # Example
 
-[![Online Demo](https://github.com/hh-hang/cesium-player-controller/blob/master/example/public/imgs/3dtiles.png)](https://hh-hang.github.io/cesium-player-controller/index.html)
+[![Online Demo](https://github.com/hh-hang/cesium-player-controller/blob/main/example/public/imgs/3dtiles.png)](https://hh-hang.github.io/cesium-player-controller/index.html)
 
 # Installation
 
