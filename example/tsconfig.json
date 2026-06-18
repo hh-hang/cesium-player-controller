@@ -1,0 +1,16 @@
+{
+    "compilerOptions": {
+        "module": "ESNext",
+        "moduleResolution": "Bundler",
+        "target": "ES2020",
+        "strict": true,
+        "skipLibCheck": true,
+        "noEmit": true,
+        "types": ["vite/client"],
+        "lib": ["ES2020", "DOM", "DOM.Iterable"],
+        "paths": {
+            "cesium-player-controller": ["../src/index.ts"]
+        }
+    },
+    "include": ["./**/*.ts", "./env.d.ts"]
+}

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>cesium-player-controller</title>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>" />
+        <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@900&family=Nunito:wght@700&display=swap" rel="stylesheet" />
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --accent: #e8a020;
+                --card-bg: #f0f0f0;
+                --card-hover: #e6e6e6;
+                --text: #1a1a2e;
+                --muted: #999;
+            }
+
+            body {
+                min-height: 100vh;
+                background: #ececec;
+                color: var(--text);
+                font-family: "Nunito", sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 2.5rem 2rem 4rem;
+            }
+
+            /* ── GitHub corner ── */
+            .github-link {
+                position: fixed;
+                top: 1.2rem;
+                right: 1.4rem;
+                color: #333;
+                transition: color 0.15s;
+                z-index: 10;
+            }
+            .github-link:hover {
+                color: #000;
+            }
+            .github-link svg {
+                width: 28px;
+                height: 28px;
+            }
+
+            h1 {
+                font-family: "Cinzel", serif;
+                font-size: clamp(1.4rem, 3.5vw, 2.2rem);
+                font-weight: 900;
+                letter-spacing: 0.06em;
+                text-align: center;
+                color: var(--text);
+                margin-bottom: 0.3rem;
+            }
+            .desc {
+                font-size: 0.88rem;
+                color: #555;
+                text-align: center;
+                max-width: 560px;
+                line-height: 1.6;
+                margin-bottom: 0.8rem;
+            }
+            .subtitle {
+                font-size: 0.78rem;
+                color: var(--muted);
+                letter-spacing: 0.14em;
+                text-transform: uppercase;
+                margin-bottom: 2.5rem;
+            }
+
+            .sections {
+                width: 100%;
+                max-width: 1200px;
+                display: flex;
+                flex-direction: column;
+                gap: 2.2rem;
+            }
+
+            .section {
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .section-head {
+                display: flex;
+                align-items: end;
+                justify-content: space-between;
+                gap: 1rem;
+                padding-bottom: 0.7rem;
+                border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            }
+
+            .section-title {
+                font-size: 1.1rem;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+            }
+
+            .section-desc {
+                font-size: 0.9rem;
+                color: #666;
+                text-align: right;
+            }
+
+            /* ── grid ── */
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+                gap: 1.2rem;
+                width: 100%;
+                max-width: 1200px;
+            }
+
+            /* ── card ── */
+            .card {
+                background: var(--card-bg);
+                border-radius: 14px;
+                overflow: hidden;
+                text-decoration: none;
+                color: var(--text);
+                display: flex;
+                flex-direction: column;
+                aspect-ratio: 4/3;
+                border: 1px solid rgba(0, 0, 0, 0.06);
+                transition:
+                    transform 0.18s ease,
+                    box-shadow 0.18s ease,
+                    background 0.18s ease;
+                opacity: 0;
+                animation: rise 0.4s ease forwards;
+            }
+            .card:hover {
+                transform: translateY(-4px) scale(1.01);
+                background: var(--card-hover);
+                box-shadow:
+                    0 12px 36px rgba(0, 0, 0, 0.12),
+                    0 0 0 2px var(--accent);
+            }
+            .card:active {
+                transform: translateY(-1px) scale(1.005);
+            }
+
+            .card-thumb {
+                flex: 1;
+                min-height: 0;
+                overflow: hidden;
+            }
+
+            .card-thumb img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                display: block;
+            }
+
+            /* 还没有截图时的占位封面：渐变 + 标签 */
+            .card-thumb.placeholder {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #fff;
+                font-family: "Cinzel", serif;
+                font-size: 1.4rem;
+                letter-spacing: 0.08em;
+                text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+            }
+            .card-thumb.ph-agihq {
+                background: linear-gradient(135deg, #3a6073, #16222a);
+            }
+            .card-thumb.ph-google {
+                background: linear-gradient(135deg, #4286f4, #1b3a7a 70%);
+            }
+
+            .card-info {
+                padding: 0.9rem 1.2rem;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                border-top: 1px solid rgba(0, 0, 0, 0.06);
+            }
+            .card-name {
+                font-size: 1rem;
+                font-weight: 700;
+            }
+           
+            .play-btn {
+                width: 2rem;
+                height: 2rem;
+                border-radius: 50%;
+                background: var(--accent);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                box-shadow: 0 2px 8px rgba(232, 160, 32, 0.35);
+                transition:
+                    transform 0.15s,
+                    background 0.15s;
+            }
+            .card:hover .play-btn {
+                transform: scale(1.12);
+                background: #f5b535;
+            }
+            .play-btn svg {
+                width: 10px;
+                height: 10px;
+                fill: #fff;
+                margin-left: 2px;
+            }
+
+            /* WIP */
+            .card.wip {
+                opacity: 0.25 !important;
+                pointer-events: none;
+                border-style: dashed;
+            }
+            .card.wip .play-btn {
+                background: var(--muted);
+                box-shadow: none;
+            }
+
+            /* stagger */
+            @keyframes rise {
+                from {
+                    opacity: 0;
+                    transform: translateY(14px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            .card:nth-child(1) {
+                animation-delay: 0.05s;
+            }
+            .card:nth-child(2) {
+                animation-delay: 0.12s;
+            }
+            .card:nth-child(3) {
+                animation-delay: 0.19s;
+            }
+
+            @media (max-width: 720px) {
+                .section-head {
+                    align-items: flex-start;
+                    flex-direction: column;
+                }
+
+                .section-desc {
+                    text-align: left;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <a class="github-link" href="https://github.com/hh-hang/cesium-player-controller" target="_blank" title="GitHub">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                    d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577
+                    0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755
+                    -1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998
+                    .108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22
+                    -.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405
+                    1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176
+                    .765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22
+                    0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297
+                    c0-6.627-5.373-12-12-12"
+                />
+            </svg>
+        </a>
+
+        <h1>cesium-player-controller</h1>
+        <p class="desc">A character controller for CesiumJS, powered by Rapier physics.</p>
+
+        <div class="sections">
+            <section class="section">
+                <div class="section-head">
+                    <div class="section-title">Model Formats</div>
+                </div>
+                <div class="grid">
+                    <a class="card" href="./3dtiles/">
+                        <div class="card-thumb">
+                            <img src="./imgs/3dtiles.png" />
+                        </div>
+                        <div class="card-info">
+                            <span class="card-name">3DTiles</span><em class="badge">Full Controls</em>
+                            <span class="play-btn"><svg viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" /></svg></span>
+                        </div>
+                    </a>
+                </div>
+            </section>
+        </div>
+    </body>
+</html>
