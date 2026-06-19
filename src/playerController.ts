@@ -518,6 +518,17 @@ export class playerController {
             radius: cr,
             halfHeight: Math.max(0.01, (ch - 2 * cr) / 2),
         });
+        // 重建胶囊体 debug
+        this.rebuildCapsuleDebug();
+    }
+
+    // 重建胶囊体 debug
+    private rebuildCapsuleDebug() {
+        if (this.debugCapsulePrimitive) {
+            this.viewer.scene.primitives.remove(this.debugCapsulePrimitive);
+            this.debugCapsulePrimitive = null;
+        }
+        if (this.displayCollider) this.updateCapsuleDebug();
     }
 
     // 切换玩家模型

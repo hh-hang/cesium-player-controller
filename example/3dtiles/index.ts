@@ -44,6 +44,7 @@ const params = {
     sunAzimuth: 185,   // 太阳方位角
     sunElevation: 40,  // 太阳高度角
     mouseSensitivity: 5,
+    scale: 0.01,
     gravity: -2400,
     jumpHeight: 900,
     playerSpeed: 300,
@@ -133,7 +134,7 @@ async function main() {
         timeScale: params.timeScale,
         playerModelConfig: {
             url: `${import.meta.env.BASE_URL}glb/UAL1_Standard.glb`,
-            scale: 0.01,
+            scale: params.scale,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",
             runAnim: "Jog_Fwd_Loop",
@@ -224,6 +225,7 @@ function initGUI(player: playerController) {
 
     gui.add(params, "showShadow").name("Show Shadow").onChange((v: boolean) => { viewer.shadows = v; });
     gui.add(params, "mouseSensitivity", 1, 20, 0.1).onChange((v: number) => player.setMouseSensitivity(v));
+    gui.add(params, "scale", 0.001, 0.05, 0.001).name("Player Scale").onChange((v: number) => player.setPlayerScale(v));
     gui.add(params, "gravity", -6000, 0, 50).onChange((v: number) => player.setGravity(v));
     gui.add(params, "jumpHeight", 0, 2000, 10).onChange((v: number) => player.setJumpHeight(v));
     gui.add(params, "playerSpeed", 0, 10000, 10).onChange((v: number) => player.setPlayerSpeed(v));
