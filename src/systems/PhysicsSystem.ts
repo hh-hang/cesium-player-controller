@@ -410,7 +410,8 @@ export class PhysicsSystem {
         res: number,
     ): Promise<TriMeshCollider> {
         const provider = viewer.terrainProvider;
-        const hasTerrain = !!provider && provider.constructor?.name !== "EllipsoidTerrainProvider";
+        // 判断是否有地形
+        const hasTerrain = !!provider && !!provider.availability;
 
         const [west, south, east, north] = rect;
         const carts: Cartographic[] = [];
