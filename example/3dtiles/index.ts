@@ -104,8 +104,9 @@ async function main() {
     // 初始点
     const spawnLon = CMath.toDegrees(carto.longitude);
     const spawnLat = CMath.toDegrees(carto.latitude);
-    const spawnHeight = carto.height + 20;
-    const initPos = Cartesian3.fromDegrees(spawnLon, spawnLat, spawnHeight);
+    // const spawnHeight = carto.height + 20;
+    // const initPos = Cartesian3.fromDegrees(spawnLon, spawnLat, spawnHeight);
+    const initPos = new Cartesian3(1216376.1904561715, -4736210.644582202, 4081328.951494063);
 
     // 生成地形碰撞范围
     const half = 0.006;
@@ -146,7 +147,7 @@ async function main() {
             flyHoverLeftAnim: "flyHoverLeft",
             flyHoverRightAnim: "flyHoverRight",
             flyHoverUpAnim: "flyHoverUp",
-            rotateY: Math.PI,
+            rotateY: - Math.PI / 2,
             facingOffset: Math.PI / 2,
         },
         // 静态碰撞源

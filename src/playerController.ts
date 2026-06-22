@@ -106,6 +106,7 @@ export class playerController {
         this.yaw = m.rotateY ?? 0;
 
         // 应用相机参数
+        this.cam.theta = this.yaw + Math.PI;
         this.cam.sensitivity = opts.mouseSensitivity ?? this.cam.sensitivity;
         this.cam.mouseMode = opts.thirdMouseMode ?? this.cam.mouseMode;
         this.cam.enableSpringCamera = opts.enableSpringCamera ?? this.cam.enableSpringCamera;
@@ -224,7 +225,7 @@ export class playerController {
     // 主循环
     update(delta: number) {
         if (!this.isupdate || !this.model || !this.physics.world) return;
-        delta = Math.min(delta, 1 / 40) * this.timeScale;
+        delta = Math.min(delta, 1 / 30) * this.timeScale;
         this.updatePlayer(delta);
     }
 

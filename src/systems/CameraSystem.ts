@@ -21,7 +21,7 @@ export class CameraSystem {
     springCameraTime = 0.05;
 
     // 第三人称轨道角：方位角 theta、仰角 phi
-    private theta = 0;
+    theta = 0;
     private phi = CMath.toRadians(70);
     private fpPitch = 0; // 第一人称俯仰
 
