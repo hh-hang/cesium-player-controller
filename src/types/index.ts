@@ -36,6 +36,19 @@ export type ColliderSource =
     | GltfCollider
     | TerrainCollider;
 
+// ==================== 动态物体形状  ====================
+// 受物理模拟、可被角色推动的动态物体的几何
+
+export type DynamicShape =
+    // 球：radius 米
+    | { kind: "ball"; radius: number }
+    // 方块：half 为 ENU 三轴半边长（米）
+    | { kind: "box"; half: { e: number; n: number; u: number } }
+    // 圆柱：轴沿 ENU Up，halfHeight 半高 + radius 半径（米）
+    | { kind: "cylinder"; halfHeight: number; radius: number }
+    // 圆锥：轴沿 ENU Up（尖朝上），halfHeight 半高 + radius 底半径（米）
+    | { kind: "cone"; halfHeight: number; radius: number };
+
 // ==================== 玩家配置 ====================
 export type PlayerModelOptions = {
     url: string; // 模型路径(GLB/GLTF）
@@ -88,7 +101,7 @@ export type PlayerControllerOptions = {
     playerModelConfig: PlayerModelOptions; // 角色模型与参数
     initPos: Cartesian3; // 初始出生点(ECEF)
     staticCollider?: ColliderSource | ColliderSource[]; // 静态碰撞源
-    dynamicCollider?: ColliderSource | ColliderSource[]; // 动态碰撞源(移动平台)
+    kinematicCollider?: ColliderSource | ColliderSource[]; // 运动学碰撞源(移动平台)
     mouseSensitivity?: number; // 鼠标灵敏度,默认 5
     minCamDistance?: number; // 第三人称最小镜头距,默认 100
     maxCamDistance?: number; // 第三人称最大镜头距,默认 440

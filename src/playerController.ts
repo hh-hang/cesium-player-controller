@@ -6,6 +6,9 @@ import {
 } from "cesium";
 import type { Viewer } from "cesium";
 
+import type { DynamicObject as DynamicBody, DynamicBodyOpts } from "./systems/PhysicsSystem";
+import type { DynamicShape } from "./types";
+import { DynamicObject } from "./dynamicObject";
 import { LocalFrame } from "./utils/frame";
 import { getGltfBboxSize } from "./utils/gltfGeometry";
 import { MobileControls } from "./utils/mobileControls";
@@ -75,6 +78,9 @@ export class playerController {
     private displayCollider = false; // 显示场景碰撞体
     private debugStaticPrimitive: any = null; // 静态碰撞体线框(地形/glTF),只建一次
     private debugCapsulePrimitive: any = null; // 玩家胶囊线框,随角色每帧重建
+
+    // ==================== 动态物体 ====================
+    private dynamicObjects: DynamicObject[] = []; // 受物理模拟、可被角色推动的物体
 
     // ==================== 子系统 ====================
     frame = new LocalFrame(); // ENU 局部坐标系
@@ -153,9 +159,9 @@ export class playerController {
         // 构建静态碰撞体
         if (opts.staticCollider) await this.physics.addStaticColliders(this.viewer, opts.staticCollider);
         // 初始化时注册动态碰撞体
-        if (opts.dynamicCollider) {
-            const list = Array.isArray(opts.dynamicCollider) ? opts.dynamicCollider : [opts.dynamicCollider];
-            for (const d of list) await this.physics.addDynamicCollider(this.viewer, d);
+        if (opts.kinematicCollider) {
+            const list = Array.isArray(opts.kinematicCollider) ? opts.kinematicCollider : [opts.kinematicCollider];
+            for (const d of list) await this.physics.addKinematicCollider(this.viewer, d);
         }
 
         // 加载玩家模型
@@ -320,6 +326,11 @@ export class playerController {
         this.physics.step();
         this.physics.moveCharacter(desiredEnu, this.posEcef);
 
+        // 同步已绑定视觉的动态物体位姿，未 attach 的跳过
+        for (const o of this.dynamicObjects) {
+            if (o.visual) this.physics.getDynamicModelMatrix(o.body.body, o.visual.modelMatrix);
+        }
+
         // 玩家朝向（对齐原库 setToward 后的朝向逻辑，按鼠标模式分支）。
         if (!this.isFirstPerson) {
             const moveYaw = Math.atan2(dirE, dirN); // 移动方向 yaw（atan2(E,N)）
@@ -358,7 +369,7 @@ export class playerController {
         this.cam.update(delta);
 
         // 刷新调试线框
-        if (this.displayCollider) this.updateCapsuleDebug();
+        if (this.displayCollider) { this.updateCapsuleDebug(); this.updateDynamicDebug(); }
     }
 
     // ==================== 内部辅助 ====================
@@ -419,6 +430,28 @@ export class playerController {
             if (this.debugStaticPrimitive) this.viewer.scene.primitives.add(this.debugStaticPrimitive);
         }
         this.updateCapsuleDebug();
+        this.updateDynamicDebug();
+    }
+
+    // 动态物体碰撞线框：几何只建一次（本体局部空间），每帧由物理位姿驱动 modelMatrix。
+    private updateDynamicDebug() {
+        if (!this.displayCollider || !this.physics.world) return;
+        for (const o of this.dynamicObjects) {
+            if (!o.debugPrimitive) {
+                const local = this.physics.buildDynamicDebugLocal(o.body);
+                o.debugPrimitive = this.makeLinePrimitive(local, Color.WHITE);
+                if (o.debugPrimitive) this.viewer.scene.primitives.add(o.debugPrimitive);
+            }
+            if (o.debugPrimitive) this.physics.getDynamicModelMatrix(o.body.body, o.debugPrimitive.modelMatrix);
+        }
+    }
+
+    // 移除某个动态物体的 debug 线框
+    private removeDynamicDebug(o: DynamicObject) {
+        if (o.debugPrimitive) {
+            this.viewer.scene.primitives.remove(o.debugPrimitive);
+            o.debugPrimitive = null;
+        }
     }
 
     // 胶囊线框:几何只建一次(ENU 局部空间),每帧只更新 modelMatrix 跟随角色(不重建、不重传 GPU)
@@ -442,6 +475,8 @@ export class playerController {
                 this[key] = null;
             }
         }
+        // 动态物体各自的碰撞线框
+        for (const o of this.dynamicObjects) this.removeDynamicDebug(o);
     }
 
     // 由扁平 ECEF 顶点(线表)构建一个线段图元;包围盒直接用 typed array 计算(不再 Array.from)
@@ -586,21 +621,55 @@ export class playerController {
     getVelocity() { return { e: this.velE, n: this.velN, u: this.velU }; }
     // 获取胶囊体（实际尺寸）
     getPlayerCapsule() { return this.capsuleInfo; }
-    // 获取当前站立的动态碰撞体
-    getActiveDynamicCollider() { return this.physics.activeDynamicSource; }
+    // 获取当前站立的运动学碰撞体
+    getActiveKinematicCollider() { return this.physics.activeKinematicSource; }
     // 获取碰撞体
     getCollider() { return this.physics.charCollider ?? null; }
 
-    // 注册动态碰撞体
-    async addDynamicCollider(collider: import("./types").ColliderSource, source?: object) {
-        const body = await this.physics.addDynamicCollider(this.viewer, collider);
-        if (body && source) this.physics.dynamicBySource.set(source, body);
+    // ==================== 动态物体 ====================
+
+    // 添加一个受物理模拟、可被角色推动的动态物体
+    addDynamicObject(positionEcef: Cartesian3, shape: DynamicShape, opts?: DynamicBodyOpts): DynamicObject {
+        const body = this.physics.createDynamicBody(positionEcef, shape, opts);
+        return this.registerDynamicObject(body);
+    }
+
+    // 移除一个动态物体
+    removeDynamicObject(obj: DynamicObject) {
+        const i = this.dynamicObjects.indexOf(obj);
+        if (i >= 0) this.dynamicObjects.splice(i, 1);
+        this.physics.removeDynamicObject(obj.body);
+        this.removeDynamicDebug(obj);
+        obj.detachVisual();
+    }
+
+    // 清除所有动态物体
+    clearDynamicObjects() {
+        for (const o of this.dynamicObjects) {
+            this.physics.removeDynamicObject(o.body);
+            this.removeDynamicDebug(o);
+            o.detachVisual();
+        }
+        this.dynamicObjects = [];
+    }
+
+    // 建句柄并登记进每帧同步列表
+    private registerDynamicObject(body: DynamicBody): DynamicObject {
+        const obj = new DynamicObject(body, this.physics);
+        this.dynamicObjects.push(obj);
+        return obj;
+    }
+
+    // 注册运动学碰撞体
+    async addKinematicCollider(collider: import("./types").ColliderSource, source?: object) {
+        const body = await this.physics.addKinematicCollider(this.viewer, collider);
+        if (body && source) this.physics.kinematicBySource.set(source, body);
         return body;
     }
-    // 注销动态碰撞体
-    removeDynamicCollider(source: object) { this.physics.removeDynamicCollider(source); }
-    // 清除所有动态碰撞体
-    clearDynamicColliders() { this.physics.clearDynamicColliders(); }
+    // 注销运动学碰撞体
+    removeKinematicCollider(source: object) { this.physics.removeKinematicCollider(source); }
+    // 清除所有运动学碰撞体
+    clearKinematicColliders() { this.physics.clearKinematicColliders(); }
 
     // --- 玩家参数 ---
     // 设置鼠标灵敏度
@@ -681,6 +750,7 @@ export class playerController {
 
         // 清除玩家对象
         if (this.model) { this.viewer.scene.primitives.remove(this.model); this.model = null; }
+        this.clearDynamicObjects();
         this.physics.destroy();
 
         // 恢复 Cesium 默认相机交互

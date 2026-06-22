@@ -1,6 +1,8 @@
 import {
     Cartesian3, Cesium3DTileset, Ion, PerspectiveFrustum, Viewer, Math as CMath, Cartographic, ShadowMode,
-    DirectionalLight, Transforms, Matrix4, Color, Entity
+    DirectionalLight, Transforms, Matrix4, Color, Entity,
+    Primitive, GeometryInstance, BoxGeometry, CylinderGeometry, VertexFormat,
+    ColorGeometryInstanceAttribute, PerInstanceColorAppearance, Model,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { playerController } from "cesium-player-controller";
@@ -79,6 +81,56 @@ function applySunLight() {
     const dir = Matrix4.multiplyByPointAsVector(enu, new Cartesian3(-e, -n, -u), new Cartesian3());
     Cartesian3.normalize(dir, dir);
     viewer.scene.light = new DirectionalLight({ direction: dir });
+}
+
+// 动态物体渲染
+function addVisualPrimitive(geometry: any, color: Color): Primitive {
+    const prim = new Primitive({
+        geometryInstances: new GeometryInstance({
+            geometry,
+            attributes: { color: ColorGeometryInstanceAttribute.fromColor(color) },
+        }),
+        appearance: new PerInstanceColorAppearance({ flat: false, translucent: false }),
+        asynchronous: false,
+    });
+    viewer.scene.primitives.add(prim);
+    return prim;
+}
+
+// 添加盒子
+function makeBoxPrimitive(size: number, color: Color): Primitive {
+    return addVisualPrimitive(BoxGeometry.fromDimensions({
+        dimensions: new Cartesian3(size, size, size),
+        vertexFormat: VertexFormat.POSITION_AND_NORMAL,
+    }), color);
+}
+
+// 添加圆柱（轴沿本地 Z=Up，与物理 cylinder 一致）
+function makeCylinderPrimitive(halfHeight: number, radius: number, color: Color): Primitive {
+    return addVisualPrimitive(new CylinderGeometry({
+        length: halfHeight * 2,
+        topRadius: radius,
+        bottomRadius: radius,
+        vertexFormat: VertexFormat.POSITION_AND_NORMAL,
+    }), color);
+}
+
+// 添加圆锥（顶半径 0 的圆柱，尖朝 +Z=Up）
+function makeConePrimitive(halfHeight: number, radius: number, color: Color): Primitive {
+    return addVisualPrimitive(new CylinderGeometry({
+        length: halfHeight * 2,
+        topRadius: 0,
+        bottomRadius: radius,
+        vertexFormat: VertexFormat.POSITION_AND_NORMAL,
+    }), color);
+}
+
+// 用 football.glb 作球的视觉（异步加载）。scale 需调到视觉直径 ≈ 碰撞球直径（2×radius）。
+async function makeFootballModel(scale: number): Promise<Model> {
+    const url = `${import.meta.env.BASE_URL}glb/football.glb`;
+    const model = await Model.fromGltfAsync({ url, scale, scene: viewer.scene });
+    viewer.scene.primitives.add(model);
+    return model;
 }
 
 async function main() {
@@ -166,6 +218,38 @@ async function main() {
             },
         ],
     });
+
+    // 动态物体添加到rapier世界
+    {
+        const enuAt = Transforms.eastNorthUpToFixedFrame(initPos, undefined, new Matrix4());
+
+        // 各 5 个：球 / 方块 / 圆柱 / 圆锥
+        const count = 5;
+        const r = 0.25, hh = 0.25;            // 半径 / 半高（世界尺度，米）
+        const opts = { restitution: 0.3 };
+
+        // 在出生点附近随机取一个 ENU 局部点（E/N 散开，U 抬高），转成 ECEF
+        const randomPos = (uBase: number) => {
+            const local = new Cartesian3((Math.random() - 0.5) * 4, 1 + (Math.random() - 0.5) * 4, uBase + Math.random() * 3);
+            return Matrix4.multiplyByPoint(enuAt, local, new Cartesian3());
+        };
+        const rndColor = () => Color.fromRandom({ alpha: 1 });
+
+        for (let i = 0; i < count; i++) {
+            // 足球
+            const ball = player.addDynamicObject(randomPos(1), { kind: "ball", radius: r }, opts);
+            makeFootballModel(r).then((model) => ball.attachVisual(model));
+            // 方块
+            player.addDynamicObject(randomPos(1), { kind: "box", half: { e: r, n: r, u: r } }, opts)
+                .attachVisual(makeBoxPrimitive(r * 2, rndColor()));
+            // 圆柱
+            player.addDynamicObject(randomPos(1), { kind: "cylinder", halfHeight: hh, radius: r }, opts)
+                .attachVisual(makeCylinderPrimitive(hh, r, rndColor()));
+            // 圆锥
+            player.addDynamicObject(randomPos(1), { kind: "cone", halfHeight: hh, radius: r }, opts)
+                .attachVisual(makeConePrimitive(hh, r, rndColor()));
+        }
+    }
 
     player.setGravity(params.gravity);
     player.setJumpHeight(params.jumpHeight);

@@ -156,8 +156,8 @@ await player.init({
             position: newCenter,
         },
     ],
-    // 动态碰撞源
-    dynamicCollider: {
+    // 运动学碰撞源
+    kinematicCollider: {
         type: "gltf",
         url: "./glb/platform.glb",
         position: initPos,
@@ -212,9 +212,52 @@ await player.init({
 | `switchPlayerModel(model)` | 运行时切换角色模型，并保留当前位置和朝向。 |
 | `changeView()` | 切换第一 / 第三人称视角。 |
 | `setFirstPersonCamera(vertAngle?)` | 直接进入第一人称，可指定初始垂直角度。 |
-| `addDynamicCollider(collider, source?)` | 注册动态碰撞体。 |
-| `removeDynamicCollider(source)` | 移除已注册的动态碰撞体。 |
-| `clearDynamicColliders()` | 移除所有动态碰撞体。 |
+| `addKinematicCollider(collider, source?)` | 注册运动学碰撞体。 |
+| `removeKinematicCollider(source)` | 移除已注册的运动学碰撞体。 |
+| `clearKinematicColliders()` | 移除所有运动学碰撞体。 |
+
+## 动态物体
+
+可被角色推动、受重力与碰撞模拟的物体（球 / 方块 / 圆柱 / 圆锥）。
+
+```ts
+import { Cartesian3, Color, EllipsoidGeometry, GeometryInstance, Primitive,
+    PerInstanceColorAppearance, ColorGeometryInstanceAttribute, VertexFormat } from "cesium";
+
+// 1) 创建动态物体（物理：半径 0.25 的球）
+const ball = player.addDynamicObject(spawnEcef, { kind: "ball", radius: 0.25 }, { density: 30, restitution: 0.3 });
+
+// 2) 自行创建视觉并加入场景（这里用内置几何，也可换成 Model.fromGltfAsync 加载 glb）
+const sphere = new Primitive({
+    geometryInstances: new GeometryInstance({
+        geometry: new EllipsoidGeometry({ radii: new Cartesian3(0.25, 0.25, 0.25), vertexFormat: VertexFormat.POSITION_AND_NORMAL }),
+        attributes: { color: ColorGeometryInstanceAttribute.fromColor(Color.ORANGE) },
+    }),
+    appearance: new PerInstanceColorAppearance(),
+    asynchronous: false,
+});
+viewer.scene.primitives.add(sphere);
+
+// 3) 绑定视觉，库每帧自动同步位姿
+ball.attachVisual(sphere);
+
+// 移除时：库只移物理，视觉需自行从场景移除
+player.removeDynamicObject(ball);
+viewer.scene.primitives.remove(sphere);
+```
+
+| 方法 | 说明 |
+| --- | --- |
+| `addDynamicObject(positionEcef, shape, opts?)` | 创建动态物体，返回句柄 `DynamicObject`。`shape` 见 [`DynamicShape`](#dynamicshape)，`opts` 见 [`DynamicBodyOpts`](#dynamicbodyopts)。 |
+| `removeDynamicObject(obj)` | 移除一个动态物体（仅移物理与 debug 线框；视觉需自行从场景移除）。 |
+| `clearDynamicObjects()` | 移除所有动态物体（同上，视觉需自行清理）。 |
+
+`DynamicObject` 句柄方法：
+
+| 方法 | 说明 |
+| --- | --- |
+| `attachVisual(visual)` | 绑定一个带 `modelMatrix` 的视觉对象，库每帧自动同步其位姿。 |
+| `detachVisual()` | 解绑视觉（不销毁视觉，仅停止同步）。 |
 
 ## 状态获取
 
@@ -230,7 +273,7 @@ await player.init({
 | `getCollider()` | Rapier 角色碰撞体。 |
 | `getCurrentPlayerAnimationName()` | 当前播放的动画片段名，没有则返回 `null`。 |
 | `getCenterScreenRaycastHit()` | 屏幕中心射线检测结果，适合做瞄准或交互。 |
-| `getActiveDynamicCollider()` | 当前玩家站立的动态碰撞体，不在动态碰撞体上时返回 `null`。 |
+| `getActiveKinematicCollider()` | 当前玩家站立的运动学碰撞体，不在运动学碰撞体上时返回 `null`。 |
 | `getCurrentLocomotionSet()` | 当前移动动作组名。 |
 
 ## 输入与运行时控制
@@ -390,7 +433,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `playerModelConfig` | `PlayerModelOptions` | 是 | - | 角色模型与参数配置。 |
 | `initPos` | `Cartesian3` | 是 | - | 初始出生点（ECEF）。 |
 | `staticCollider` | `ColliderSource \| ColliderSource[]` | 否 | - | 静态碰撞体来源；不传则仅使用基础贴地检测。 |
-| `dynamicCollider` | `ColliderSource \| ColliderSource[]` | 否 | - | 初始化时注册的动态碰撞体。 |
+| `kinematicCollider` | `ColliderSource \| ColliderSource[]` | 否 | - | 初始化时注册的运动学碰撞体。 |
 | `mouseSensitivity` | `number` | 否 | `5` | 鼠标灵敏度。 |
 | `minCamDistance` | `number` | 否 | `100` | 第三人称最小镜头距离。 |
 | `maxCamDistance` | `number` | 否 | `440` | 第三人称最大镜头距离。 |
@@ -446,6 +489,27 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `terrain` | `rectangle`, `resolution?` | Cesium 地形碰撞源，`rectangle` 为 `[west, south, east, north]` 弧度。 |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB 碰撞源。 |
 | `trimesh` | `positions`, `indices` | 自定义三角网格碰撞源。 |
+
+### `DynamicShape`
+
+动态物体的碰撞形状，几何参数为世界尺度（米）。
+
+| `kind` | 字段 | 说明 |
+| --- | --- | --- |
+| `ball` | `radius` | 球。 |
+| `box` | `half` | 方块，`half` 为 ENU 三轴半边长 `{ e, n, u }`。 |
+| `cylinder` | `halfHeight`, `radius` | 圆柱，轴沿本地 Up。 |
+| `cone` | `halfHeight`, `radius` | 圆锥，轴沿本地 Up（尖朝上）。 |
+
+### `DynamicBodyOpts`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `density` | `number` | 否 | `1` | 密度，影响质量与被推动手感（质量 = 体积 × 密度）。 |
+| `restitution` | `number` | 否 | `0.2` | 弹性，`0` 不反弹，`1` 完全弹。 |
+| `friction` | `number` | 否 | `0.6` | 摩擦。 |
+| `linearDamping` | `number` | 否 | `0.4` | 线性阻尼，越大滑行越快停。 |
+| `angularDamping` | `number` | 否 | `0.6` | 角阻尼，越大旋转越快停。 |
 
 ### `MobileControlsOptions`
 

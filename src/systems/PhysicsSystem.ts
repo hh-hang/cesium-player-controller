@@ -1,12 +1,28 @@
 import type RAPIER from "@dimforge/rapier3d-compat";
-import { Cartesian3, sampleTerrainMostDetailed, Cartographic, Math as CMath, Matrix4, Transforms, HeadingPitchRoll } from "cesium";
+import { Cartesian3, sampleTerrainMostDetailed, Cartographic, Math as CMath, Matrix3, Matrix4, Quaternion, Transforms, HeadingPitchRoll } from "cesium";
 import { LocalFrame } from "../utils/frame";
 import { loadGltfGeometry } from "../utils/gltfGeometry";
-import type { ColliderSource, TriMeshCollider } from "../types";
+import type { ColliderSource, TriMeshCollider, DynamicShape } from "../types";
 
 export interface CharacterShapeDesc {
     radius: number; // 胶囊半径
     halfHeight: number; // 胶囊圆柱段半高
+}
+
+// 可被推动的动态刚体：Rapier 模拟，每帧读回位姿驱动视觉
+export interface DynamicObject {
+    body: RAPIER.RigidBody; // 动态刚体
+    collider: RAPIER.Collider; // 其碰撞体
+    shape: DynamicShape; // 碰撞形状描述
+}
+
+// 动态刚体可选参数
+export interface DynamicBodyOpts {
+    density?: number; // 密度（影响质量），默认 1
+    restitution?: number; // 弹性（0=不反弹，1=完全弹），默认 0.2
+    friction?: number; // 摩擦，默认 0.6
+    linearDamping?: number; // 线性阻尼（越大滑得越快停），默认 0.4
+    angularDamping?: number; // 角阻尼（越大转得越快停），默认 0.6
 }
 
 export interface CharacterControllerOpts {
@@ -43,9 +59,9 @@ export class PhysicsSystem {
 
     // 碰撞体登记
     private staticColliders: RAPIER.Collider[] = []; // 静态碰撞体
-    private dynamicBodies = new Map<RAPIER.RigidBody, RAPIER.Collider>(); // 动态刚体
-    dynamicBySource = new Map<object, RAPIER.RigidBody>(); // 动态刚体登记（按来源对象索引）
-    activeDynamicSource: object | null = null; // 当前玩家站立的动态碰撞源
+    private kinematicBodies = new Map<RAPIER.RigidBody, RAPIER.Collider>(); // 运动学刚体（移动平台）
+    kinematicBySource = new Map<object, RAPIER.RigidBody>(); // 运动学刚体登记（按来源对象索引）
+    activeKinematicSource: object | null = null; // 当前玩家站立的运动学碰撞源
 
     onGround = false; // 是否在地面上
 
@@ -260,6 +276,58 @@ export class PhysicsSystem {
         return new Float64Array(pts);
     }
 
+    // 动态物体碰撞形状的调试线框（本体局部 ENU 空间，x=E/y=N/z=U）
+    buildDynamicDebugLocal(obj: DynamicObject, seg = 20): Float64Array {
+        const pts: number[] = [];
+        const line = (x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) =>
+            pts.push(x1, y1, z1, x2, y2, z2);
+        // 三个轴向圆环（半径环），用于球/圆柱/圆锥/胶囊轮廓
+        const ring = (r: number, axis: 0 | 1 | 2, off = 0) => {
+            for (let k = 0; k < seg; k++) {
+                const a1 = (k / seg) * 2 * Math.PI, a2 = ((k + 1) / seg) * 2 * Math.PI;
+                const c1 = r * Math.cos(a1), s1 = r * Math.sin(a1);
+                const c2 = r * Math.cos(a2), s2 = r * Math.sin(a2);
+                if (axis === 2) line(c1, s1, off, c2, s2, off);       // E-N 平面（绕 Up）
+                else if (axis === 0) line(off, c1, s1, off, c2, s2);  // N-U 平面（绕 E）
+                else line(c1, off, s1, c2, off, s2);                  // E-U 平面（绕 N）
+            }
+        };
+        const s = obj.shape;
+        switch (s.kind) {
+            case "ball": {
+                const r = s.radius;
+                ring(r, 2, 0); ring(r, 0, 0); ring(r, 1, 0); // 三个正交大圆
+                break;
+            }
+            case "box": {
+                // 12 条棱：half 三轴半边长（ENU）
+                const { e, n, u } = s.half;
+                const C: [number, number, number][] = [];
+                for (const sx of [-e, e]) for (const sy of [-n, n]) for (const sz of [-u, u]) C.push([sx, sy, sz]);
+                const edge = (a: number, b: number) => line(C[a][0], C[a][1], C[a][2], C[b][0], C[b][1], C[b][2]);
+                // 顶点序：索引按 (sx,sy,sz) 二进制；连接相差一位的为棱
+                for (let i = 0; i < 8; i++) for (let bit = 0; bit < 3; bit++) {
+                    const j = i ^ (1 << bit);
+                    if (i < j) edge(i, j);
+                }
+                break;
+            }
+            case "cylinder": {
+                const hh = s.halfHeight, r = s.radius;
+                ring(r, 2, hh); ring(r, 2, -hh); // 上下两个圆（轴沿 U）
+                for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r]] as const) line(dx, dy, hh, dx, dy, -hh); // 4 条母线
+                break;
+            }
+            case "cone": {
+                const hh = s.halfHeight, r = s.radius;
+                ring(r, 2, -hh); // 底圆（轴沿 U，尖朝 +U）
+                for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r]] as const) line(dx, dy, -hh, 0, 0, hh); // 4 条到尖的棱
+                break;
+            }
+        }
+        return new Float64Array(pts);
+    }
+
     // 胶囊线框 modelMatrix(每帧):enuToEcef · 平移(角色 ENU 位置),把局部几何摆到当前 ECEF 位置。
     getCapsuleModelMatrix(out = new Matrix4()): Matrix4 {
         const t = this.charBody.translation(); // Rapier 空间胶囊中心
@@ -282,6 +350,89 @@ export class PhysicsSystem {
         this.world.step();
     }
 
+    // ==================== 可推动的动态刚体 ====================
+
+    private physicsObjects: DynamicObject[] = []; // 受物理模拟驱动的动态刚体
+
+    /**
+     * 创建一个可被角色推动的动态刚体，放在指定 ECEF 位置。
+     * @param positionEcef 初始位置（ECEF，物体中心）
+     * @param shape 形状描述（几何参数为世界尺度，米）
+     */
+    createDynamicBody(positionEcef: Cartesian3, shape: DynamicShape, opts?: DynamicBodyOpts): DynamicObject {
+        const r = this.rapier;
+        const p = this.frame.ecefToRapier(positionEcef);
+        const bodyDesc = r.RigidBodyDesc.dynamic()
+            .setTranslation(p.x, p.y, p.z)
+            .setLinearDamping(opts?.linearDamping ?? 0.4)
+            .setAngularDamping(opts?.angularDamping ?? 0.6);
+        const body = this.world.createRigidBody(bodyDesc);
+        const colDesc = this.makeColliderDesc(shape)
+            .setDensity(opts?.density ?? 1)
+            .setRestitution(opts?.restitution ?? 0.2)
+            .setFriction(opts?.friction ?? 0.6);
+        const collider = this.world.createCollider(colDesc, body);
+        const obj: DynamicObject = { body, collider, shape };
+        this.physicsObjects.push(obj);
+        return obj;
+    }
+
+    // 按形状描述产出 Rapier collider 描述
+    private makeColliderDesc(shape: DynamicShape): RAPIER.ColliderDesc {
+        const r = this.rapier;
+        switch (shape.kind) {
+            case "ball":
+                return r.ColliderDesc.ball(shape.radius);
+            case "box": {
+                const h = LocalFrame.enuToRapier(shape.half.e, shape.half.n, shape.half.u);
+                return r.ColliderDesc.cuboid(Math.abs(h.x), Math.abs(h.y), Math.abs(h.z));
+            }
+            case "cylinder":
+                return r.ColliderDesc.cylinder(shape.halfHeight, shape.radius);
+            case "cone":
+                return r.ColliderDesc.cone(shape.halfHeight, shape.radius);
+        }
+    }
+
+    // 把动态刚体当前位姿（Rapier 局部系）→ ECEF modelMatrix，供 Cesium Primitive/Model 摆放。
+    getDynamicModelMatrix(body: RAPIER.RigidBody, out = new Matrix4()): Matrix4 {
+        const t = body.translation();
+        const q = body.rotation();
+        // 平移：Rapier → ENU(Z-up)
+        const enuPos = LocalFrame.rapierToEnu(t.x, t.y, t.z, this._dynScratchEnu);
+        // 自转：Rapier 四元数 → 3x3，再把每一列（基向量）从 Rapier 轴换到 ENU 轴
+        const quat = this._dynScratchQuat;
+        quat.x = q.x; quat.y = q.y; quat.z = q.z; quat.w = q.w;
+        Matrix3.fromQuaternion(quat, this._dynScratchRot);
+        const m = this._dynScratchRot; // 列主序：列0=本体X基，列1=本体Y基，列2=本体Z基
+        const c0 = LocalFrame.rapierToEnu(m[0], m[1], m[2], this._dynScratchC0);
+        const c1 = LocalFrame.rapierToEnu(m[3], m[4], m[5], this._dynScratchC1);
+        const c2 = LocalFrame.rapierToEnu(m[6], m[7], m[8], this._dynScratchC2);
+        // ENU 轴系下的旋转基（行主序构造，列 = [c0, c1, c2]）
+        const rotEnu = Matrix3.fromArray(
+            [c0.x, c0.y, c0.z, c1.x, c1.y, c1.z, c2.x, c2.y, c2.z],
+            0, this._dynScratchRotEnu,
+        );
+        const local = Matrix4.fromRotationTranslation(rotEnu, enuPos, this._dynScratchLocal);
+        // 整体左乘 enuToEcef，把局部位姿摆到地球上
+        return Matrix4.multiply(this.frame.enuToEcef, local, out);
+    }
+    private _dynScratchEnu = new Cartesian3();
+    private _dynScratchQuat = new Quaternion();
+    private _dynScratchRot: Matrix3 = new Matrix3();
+    private _dynScratchRotEnu: Matrix3 = new Matrix3();
+    private _dynScratchLocal = new Matrix4();
+    private _dynScratchC0 = new Cartesian3();
+    private _dynScratchC1 = new Cartesian3();
+    private _dynScratchC2 = new Cartesian3();
+
+    // 移除一个动态刚体（连带 collider）
+    removeDynamicObject(obj: DynamicObject) {
+        const i = this.physicsObjects.indexOf(obj);
+        if (i >= 0) this.physicsObjects.splice(i, 1);
+        this.world.removeRigidBody(obj.body);
+    }
+
     // ==================== 碰撞源 → Rapier collider ====================
 
     // 注册一批静态碰撞源
@@ -298,37 +449,37 @@ export class PhysicsSystem {
         }
     }
 
-    // 注册一个动态(可移动)碰撞源,返回其刚体以便外部每帧驱动
-    async addDynamicCollider(viewer: any, source: ColliderSource): Promise<RAPIER.RigidBody | null> {
+    // 注册一个运动学(可移动平台)碰撞源,返回其刚体以便外部每帧驱动
+    async addKinematicCollider(viewer: any, source: ColliderSource): Promise<RAPIER.RigidBody | null> {
         const r = this.rapier;
         const tri = await this.resolveTriMesh(viewer, source);
         if (!tri) return null;
         const body = this.world.createRigidBody(r.RigidBodyDesc.kinematicPositionBased());
         const col = this.world.createCollider(this.triColliderDesc(tri), body);
-        this.dynamicBodies.set(body, col);
+        this.kinematicBodies.set(body, col);
         return body;
     }
 
-    // 移除动态碰撞源(按来源对象)
-    removeDynamicCollider(source: object) {
-        const body = this.dynamicBySource.get(source);
+    // 移除运动学碰撞源(按来源对象)
+    removeKinematicCollider(source: object) {
+        const body = this.kinematicBySource.get(source);
         if (!body) return;
-        this.dynamicBodies.delete(body);
-        this.dynamicBySource.delete(source);
-        if (this.activeDynamicSource === source) this.activeDynamicSource = null;
+        this.kinematicBodies.delete(body);
+        this.kinematicBySource.delete(source);
+        if (this.activeKinematicSource === source) this.activeKinematicSource = null;
         this.world.removeRigidBody(body); // 连带移除其 collider
     }
 
-    // 清除所有动态碰撞源
-    clearDynamicColliders() {
-        for (const body of this.dynamicBodies.keys()) this.world.removeRigidBody(body);
-        this.dynamicBodies.clear();
-        this.dynamicBySource.clear();
-        this.activeDynamicSource = null;
+    // 清除所有运动学碰撞源
+    clearKinematicColliders() {
+        for (const body of this.kinematicBodies.keys()) this.world.removeRigidBody(body);
+        this.kinematicBodies.clear();
+        this.kinematicBySource.clear();
+        this.activeKinematicSource = null;
     }
 
-    // 驱动动态刚体到新位置/朝向(ECEF) 
-    setDynamicBodyTransform(body: RAPIER.RigidBody, positionEcef: Cartesian3) {
+    // 驱动运动学刚体到新位置/朝向(ECEF)
+    setKinematicBodyTransform(body: RAPIER.RigidBody, positionEcef: Cartesian3) {
         const p = this.frame.ecefToRapier(positionEcef);
         body.setNextKinematicTranslation(p);
     }
@@ -450,7 +601,8 @@ export class PhysicsSystem {
     // 销毁物理系统
     destroy() {
         this.staticColliders = [];
-        this.dynamicBodies.clear();
+        this.kinematicBodies.clear();
+        this.physicsObjects = [];
         if (this.world) this.world.free();
     }
 }

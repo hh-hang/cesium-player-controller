@@ -156,8 +156,8 @@ await player.init({
             position: newCenter,
         },
     ],
-    // Dynamic collider source
-    dynamicCollider: {
+    // Kinematic collider source
+    kinematicCollider: {
         type: "gltf",
         url: "./glb/platform.glb",
         position: initPos,
@@ -212,9 +212,52 @@ await player.init({
 | `switchPlayerModel(model)` | Switches the character model at runtime, retaining current position and orientation. |
 | `changeView()` | Toggles between first/third-person view. |
 | `setFirstPersonCamera(vertAngle?)` | Directly enters first-person view, can specify initial vertical angle. |
-| `addDynamicCollider(collider, source?)` | Registers a dynamic collider. |
-| `removeDynamicCollider(source)` | Removes a registered dynamic collider. |
-| `clearDynamicColliders()` | Removes all dynamic colliders. |
+| `addKinematicCollider(collider, source?)` | Registers a kinematic collider. |
+| `removeKinematicCollider(source)` | Removes a registered kinematic collider. |
+| `clearKinematicColliders()` | Removes all kinematic colliders. |
+
+## Dynamic Objects
+
+Objects that can be pushed by the character and are driven by gravity and collision (ball / box / cylinder / cone).
+
+```ts
+import { Cartesian3, Color, EllipsoidGeometry, GeometryInstance, Primitive,
+    PerInstanceColorAppearance, ColorGeometryInstanceAttribute, VertexFormat } from "cesium";
+
+// 1) Create a dynamic object (physics: a ball of radius 0.25)
+const ball = player.addDynamicObject(spawnEcef, { kind: "ball", radius: 0.25 }, { density: 30, restitution: 0.3 });
+
+// 2) Create the visual yourself and add it to the scene (built-in geometry here; could be Model.fromGltfAsync for a glb)
+const sphere = new Primitive({
+    geometryInstances: new GeometryInstance({
+        geometry: new EllipsoidGeometry({ radii: new Cartesian3(0.25, 0.25, 0.25), vertexFormat: VertexFormat.POSITION_AND_NORMAL }),
+        attributes: { color: ColorGeometryInstanceAttribute.fromColor(Color.ORANGE) },
+    }),
+    appearance: new PerInstanceColorAppearance(),
+    asynchronous: false,
+});
+viewer.scene.primitives.add(sphere);
+
+// 3) Bind the visual; the library syncs its pose every frame
+ball.attachVisual(sphere);
+
+// On removal: the library only removes physics; remove the visual yourself
+player.removeDynamicObject(ball);
+viewer.scene.primitives.remove(sphere);
+```
+
+| Method | Description |
+| --- | --- |
+| `addDynamicObject(positionEcef, shape, opts?)` | Creates a dynamic object and returns a `DynamicObject` handle. See [`DynamicShape`](#dynamicshape) for `shape` and [`DynamicBodyOpts`](#dynamicbodyopts) for `opts`. |
+| `removeDynamicObject(obj)` | Removes a dynamic object (physics and debug wireframe only; remove the visual yourself). |
+| `clearDynamicObjects()` | Removes all dynamic objects (same as above; clean up visuals yourself). |
+
+`DynamicObject` handle methods:
+
+| Method | Description |
+| --- | --- |
+| `attachVisual(visual)` | Binds an object with a `modelMatrix`; the library syncs its pose every frame. |
+| `detachVisual()` | Unbinds the visual (does not dispose it, only stops syncing). |
 
 ## State Retrieval
 
@@ -230,7 +273,7 @@ await player.init({
 | `getCollider()` | Rapier character collider. |
 | `getCurrentPlayerAnimationName()` | Name of the currently playing animation clip, `null` if none. |
 | `getCenterScreenRaycastHit()` | Raycast result from the center of the screen, suitable for aiming or interaction. |
-| `getActiveDynamicCollider()` | The dynamic collider the player is currently standing on, `null` if not on one. |
+| `getActiveKinematicCollider()` | The kinematic collider the player is currently standing on, `null` if not on one. |
 | `getCurrentLocomotionSet()` | Name of the current locomotion set. |
 
 ## Input and Runtime Control
@@ -390,7 +433,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `playerModelConfig` | `PlayerModelOptions` | Yes | - | Character model and parameter configuration. |
 | `initPos` | `Cartesian3` | Yes | - | Initial spawn point (ECEF). |
 | `staticCollider` | `ColliderSource \| ColliderSource[]` | No | - | Static collider source; if not provided, only uses basic ground detection. |
-| `dynamicCollider` | `ColliderSource \| ColliderSource[]` | No | - | Dynamic colliders registered during initialization. |
+| `kinematicCollider` | `ColliderSource \| ColliderSource[]` | No | - | Kinematic colliders (movable platforms) registered during initialization. |
 | `mouseSensitivity` | `number` | No | `5` | Mouse sensitivity. |
 | `minCamDistance` | `number` | No | `100` | Third-person minimum camera distance. |
 | `maxCamDistance` | `number` | No | `440` | Third-person maximum camera distance. |
@@ -446,6 +489,27 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `terrain` | `rectangle`, `resolution?` | Cesium terrain collider source, `rectangle` is `[west, south, east, north]` in radians. |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB collider source. |
 | `trimesh` | `positions`, `indices` | Custom triangle mesh collider source. |
+
+### `DynamicShape`
+
+Collision shape of a dynamic object. Geometry parameters are in world scale (meters).
+
+| `kind` | Fields | Description |
+| --- | --- | --- |
+| `ball` | `radius` | Sphere. |
+| `box` | `half` | Box; `half` is the ENU half-extents `{ e, n, u }`. |
+| `cylinder` | `halfHeight`, `radius` | Cylinder, axis along local Up. |
+| `cone` | `halfHeight`, `radius` | Cone, axis along local Up (apex up). |
+
+### `DynamicBodyOpts`
+
+| Field | Type | Required | Default Value | Description |
+| --- | --- | --- | --- | --- |
+| `density` | `number` | No | `1` | Density; affects mass and push feel (mass = volume × density). |
+| `restitution` | `number` | No | `0.2` | Restitution; `0` no bounce, `1` fully elastic. |
+| `friction` | `number` | No | `0.6` | Friction. |
+| `linearDamping` | `number` | No | `0.4` | Linear damping; higher stops sliding sooner. |
+| `angularDamping` | `number` | No | `0.6` | Angular damping; higher stops spinning sooner. |
 
 ### `MobileControlsOptions`
 
