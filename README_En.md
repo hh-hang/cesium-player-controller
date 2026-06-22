@@ -7,6 +7,7 @@ English | [中文](README.md)
 [![NPM Package][npm]][npm-url]
 [![Github][github]][github-url]
 [![X][x]][x-url]
+[![Three.js](https://img.shields.io/badge/Three.js-player_controller-blue)](https://github.com/hh-hang/three-player-controller)
 
 An out-of-the-box player controller for CesiumJS, providing character capsule collision, animations, first/third-person view switching, and camera collision avoidance.
 

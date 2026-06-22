@@ -7,6 +7,7 @@
 [![NPM Package][npm]][npm-url]
 [![Github][github]][github-url]
 [![X][x]][x-url]
+[![Three.js](https://img.shields.io/badge/Three.js-player_controller-blue)](https://github.com/hh-hang/three-player-controller)
 
 基于 CesiumJS 的玩家控制器，开箱即用，提供人物胶囊体碰撞、动画、第一 / 第三人称切换、相机避障。
 

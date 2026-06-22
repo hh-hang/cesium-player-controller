@@ -51,6 +51,37 @@
                 height: 28px;
             }
 
+            .version-switch {
+                position: fixed;
+                top: 1.2rem;
+                left: 1.4rem;
+                z-index: 10;
+                display: inline-flex;
+                border-radius: 20px;
+                overflow: hidden;
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                background: #fff;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+                font-size: 0.82rem;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+            }
+            .version-switch-active {
+                padding: 6px 14px;
+                background: var(--accent);
+                color: #fff;
+            }
+            .version-switch-link {
+                padding: 6px 14px;
+                color: var(--text);
+                text-decoration: none;
+                transition: background 0.15s, color 0.15s;
+            }
+            .version-switch-link:hover {
+                background: rgba(0, 0, 0, 0.05);
+                color: #000;
+            }
+
             h1 {
                 font-family: "Cinzel", serif;
                 font-size: clamp(1.4rem, 3.5vw, 2.2rem);
@@ -277,6 +308,11 @@
                 />
             </svg>
         </a>
+
+        <div class="version-switch">
+            <a href="https://hh-hang.github.io/three-player-controller/" class="version-switch-link">Three.js</a>
+            <span class="version-switch-active">CesiumJS</span>
+        </div>
 
         <h1>cesium-player-controller</h1>
         <p class="desc">A character controller for CesiumJS, powered by Rapier physics.</p>
