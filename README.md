@@ -138,8 +138,7 @@ await player.init({
         // 模型参数（可选）
         rotateY: 0,                            // 人物初始朝向（弧度）
         facingOffset: 0,                       // 模型正面轴校正（弧度）
-        headBoneName: "Head",                  // 头部骨骼名，用于第一人称相机挂载
-        firstPersonCameraOffset: [0, 40, 30],  // 第一人称相机局部偏移
+        firstPersonCameraOffset: [0, 0, 0],    // 第一人称相机局部偏移（x=右、y=前、z=上，随朝向转动）
         capsuleRadiusRatio: 1,                 // 胶囊体半径倍率
     },
 
@@ -478,8 +477,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `flySpeed` | `number` | 否 | `2100` | 飞行速度基准值（按 `scale` 缩放）。 |
 | `rotateY` | `number` | 否 | `0` | 人物初始朝向（弧度）。 |
 | `facingOffset` | `number` | 否 | `0` | 模型正面轴校正（弧度）。 |
-| `headBoneName` | `string` | 否 | - | 头部骨骼或节点名，用于第一人称相机挂载。 |
-| `firstPersonCameraOffset` | `[number, number, number]` | 否 | 内置默认值 | 第一人称相机局部偏移。 |
+| `firstPersonCameraOffset` | `[number, number, number]` | 否 | `[0,0,0]` | 第一人称相机局部偏移。基于胶囊顶部，在玩家朝向系（`x`=右、`y`=前、`z`=上）下叠加，随 `yaw` 转动，按 `scale` 缩放。 |
 | `capsuleRadiusRatio` | `number` | 否 | `1` | 胶囊体半径倍率。 |
 | `acceleration` | `number` | 否 | `30` | XZ 方向加速响应速度，值越大加速越快。 |
 | `deceleration` | `number` | 否 | `30` | XZ 方向减速响应速度，值越大停止越快。 |

@@ -138,8 +138,7 @@ await player.init({
         // Model parameters (optional)
         rotateY: 0,                            // Initial player orientation (radians)
         facingOffset: 0,                       // Model front axis correction (radians)
-        headBoneName: "Head",                  // Head bone name for first-person camera attachment
-        firstPersonCameraOffset:,  // First-person camera local offset
+        firstPersonCameraOffset: [0, 0, 0],    // First-person camera local offset (x=right, y=forward, z=up, rotates with heading)
         capsuleRadiusRatio: 1,                 // Capsule radius multiplier
     },
 
@@ -478,8 +477,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `flySpeed` | `number` | No | `2100` | Flight speed base value (scaled by `scale`). |
 | `rotateY` | `number` | No | `0` | Initial character orientation (radians). |
 | `facingOffset` | `number` | No | `0` | Model front axis correction (radians). |
-| `headBoneName` | `string` | No | - | Head bone or node name, used for first-person camera attachment. |
-| `firstPersonCameraOffset` | `[number, number, number]` | No | Built-in default | First-person camera local offset. |
+| `firstPersonCameraOffset` | `[number, number, number]` | No | `[0,0,0]` | First-person camera local offset. Based on the capsule top, applied in the player heading frame (`x`=right, `y`=forward, `z`=up), rotates with `yaw`, scaled by `scale`. |
 | `capsuleRadiusRatio` | `number` | No | `1` | Capsule radius multiplier. |
 | `acceleration` | `number` | No | `30` | XZ acceleration response speed, higher value means faster acceleration. |
 | `deceleration` | `number` | No | `30` | XZ deceleration response speed, higher value means faster stopping. |

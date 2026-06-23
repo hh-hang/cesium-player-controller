@@ -74,8 +74,7 @@ export type PlayerModelOptions = {
     flySpeed?: number; // 飞行速度基准(按 scale 缩放),默认 2100
     rotateY?: number; // 人物初始朝向(弧度),默认 0
     facingOffset?: number; // 模型正面轴校正(弧度):正面 +Y 用 0,+X 用 -π/2,-Y 用 π,-X 用 π/2
-    headBoneName?: string; // 头部骨骼名,用于第一人称相机挂载
-    firstPersonCameraOffset?: [number, number, number]; // 第一人称相机局部偏移
+    firstPersonCameraOffset?: [number, number, number]; // 第一人称相机局部偏移(基于胶囊顶部,玩家朝向系 x=右/y=前/z=上,随 yaw 转动,按 scale 缩放),默认 [0,0,0]
     capsuleRadiusRatio?: number; // 胶囊体半径倍率,默认 1
     acceleration?: number; // XZ 加速响应速度,默认 30
     deceleration?: number; // XZ 减速响应速度,默认 30

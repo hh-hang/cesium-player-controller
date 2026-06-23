@@ -190,7 +190,7 @@ async function main() {
             scale: params.scale,
             idleAnim: "Idle_Loop",
             walkAnim: "Walk_Loop",
-            runAnim: "Jog_Fwd_Loop",
+            runAnim: "Sprint_Loop",
             jumpAnim: ["Jump_Start", "Jump_Loop", "Jump_Land"],
             flyAnim: "fly",
             flyIdleAnim: "flyIdle",
@@ -264,11 +264,11 @@ async function main() {
     sunRefEcef = initPos;
     applySunLight();
 
-    // 第一人称隐藏人物模型
-    player.onViewChange = (isFirstPerson) => {
-        const model = player.getPlayerModel();
-        if (model) model.show = !isFirstPerson;
-    };
+    // // 第一人称隐藏人物模型
+    // player.onViewChange = (isFirstPerson) => {
+    //     const model = player.getPlayerModel();
+    //     if (model) model.show = !isFirstPerson;
+    // };
 
     // 准星射线交点可视化小球
     const raycastSphere = viewer.entities.add(new Entity({

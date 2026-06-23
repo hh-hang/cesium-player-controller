@@ -180,9 +180,10 @@ export class CameraSystem {
         return maxDist;
     }
 
-    // 第一人称：相机放到头骨/胶囊偏移，按 yaw + pitch 求朝向
+    // 第一人称：相机放到胶囊顶部偏移，按 yaw + pitch 求朝向
     private updateFirstPerson() {
-        const head = this.ctrl.getHeadWorldPosition() ?? this.getLookAtPoint(this._lookAtPoint);
+        const offset = this.ctrl.playerModelConfig.firstPersonCameraOffset;
+        const head = this.ctrl.getHeadWorldPosition(offset);
         const yaw = this.ctrl.getYaw();
         // 在 head 处建 ENU，按 yaw + pitch 求朝向
         const enu = Transforms.eastNorthUpToFixedFrame(head, undefined, this._enu);

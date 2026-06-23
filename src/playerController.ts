@@ -1,5 +1,5 @@
 import {
-    Cartesian3, Matrix4, Model, Transforms, Math as CMath,
+    Cartesian3, Matrix3, Matrix4, Model, Transforms, Math as CMath,
     Primitive, GeometryInstance, Geometry as GeometryClass, GeometryAttribute,
     ComponentDatatype, PrimitiveType, BoundingSphere, ColorGeometryInstanceAttribute,
     Color, PerInstanceColorAppearance,
@@ -513,19 +513,24 @@ export class playerController {
     // 获取玩家朝向
     getYaw() { return this.yaw; }
 
-    // 头骨世界坐标（第一人称相机挂载用，无头骨则回退胶囊顶部）
-    getHeadWorldPosition(): Cartesian3 | null {
-        const name = this.playerModelConfig.headBoneName;
-        if (this.model && name) {
-            const node = (this.model as any).getNode?.(name);
-            if (node?.matrix) {
-                const t = new Cartesian3(node.matrix[12], node.matrix[13], node.matrix[14]);
-                return Matrix4.multiplyByPoint(this.model.modelMatrix, t, new Cartesian3());
-            }
-        }
-        // 回退：胶囊顶部
-        const up = Cartesian3.normalize(this.posEcef, new Cartesian3());
-        return Cartesian3.add(this.posEcef, Cartesian3.multiplyByScalar(up, this.capsuleInfo.height * 0.5, up), new Cartesian3());
+    // 第一人称相机位置：胶囊顶部 + offset
+    // offset 在玩家朝向系（x=右、y=前、z=上），随 yaw 转动，乘 scale
+    getHeadWorldPosition(offset?: [number, number, number]): Cartesian3 {
+        const base = Cartesian3.add(
+            this.posEcef,
+            Cartesian3.multiplyByScalar(
+                Cartesian3.normalize(this.posEcef, new Cartesian3()),
+                this.capsuleInfo.height * 0.5,
+                new Cartesian3(),
+            ),
+            new Cartesian3(),
+        );
+        const s = this.playerModelConfig.scale;
+        const [x, y, z] = offset ?? [0, 0, 0];
+        // ENU 绕 Up 旋转 -yaw，使 +y 对齐玩家朝向 (sin yaw, cos yaw)、+x 为其右侧
+        const enu = Transforms.eastNorthUpToFixedFrame(base, undefined, new Matrix4());
+        const heading = Matrix4.multiplyByMatrix3(enu, Matrix3.fromRotationZ(-this.yaw, new Matrix3()), new Matrix4());
+        return Matrix4.multiplyByPoint(heading, new Cartesian3(x * s, y * s, z * s), new Cartesian3());
     }
 
     // 动态修改缩放
