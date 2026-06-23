@@ -56,7 +56,8 @@ viewer.scene.primitives.add(tileset);
 await viewer.flyTo(tileset);
 
 // 设置人物出生点
-const carto = Cartographic.fromCartesian(tileset.boundingSphere.center);
+const center = tileset.boundingSphere.center;
+const carto = Cartographic.fromCartesian(center);
 const initPos = Cartesian3.fromDegrees(
     CMath.toDegrees(carto.longitude),
     CMath.toDegrees(carto.latitude),
@@ -82,7 +83,7 @@ await player.init({
     staticCollider: {
         type: "gltf",
         url: "./glb/agi-hq.glb",
-        position: newCenter,
+        position: center,
     },
 });
 
