@@ -264,11 +264,11 @@ async function main() {
     sunRefEcef = initPos;
     applySunLight();
 
-    // // 第一人称隐藏人物模型
-    // player.onViewChange = (isFirstPerson) => {
-    //     const model = player.getPlayerModel();
-    //     if (model) model.show = !isFirstPerson;
-    // };
+    // 第一人称隐藏人物模型
+    player.onViewChange = (isFirstPerson) => {
+        const model = player.getPlayerModel();
+        if (model) model.show = !isFirstPerson;
+    };
 
     // 准星射线交点可视化小球
     const raycastSphere = viewer.entities.add(new Entity({
