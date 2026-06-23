@@ -15,7 +15,7 @@ export class CameraSystem {
     sensitivity = 5; // 鼠标灵敏度
     mouseMode: 0 | 1 | 2 | 3 | 4 | 5 = 1; // 鼠标控制模式
     zoomEnabled = false; // 是否允许缩放
-    lookAtHeightRatio = 1; // 第三人称看向点高度比例（0=底部，1=顶部）
+    lookAtHeightRatio = 0.8; // 第三人称看向点高度比例（0=底部，1=顶部）
 
     enableSpringCamera = false;
     springCameraTime = 0.05;
