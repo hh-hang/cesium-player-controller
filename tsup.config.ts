@@ -9,4 +9,7 @@ export default defineConfig({
     external: ["cesium", "@dimforge/rapier3d-compat"],
     target: "es2020",
     minify: false,
+    outExtension({ format }) {
+        return { js: format === "esm" ? ".mjs" : ".js" };
+    },
 });
