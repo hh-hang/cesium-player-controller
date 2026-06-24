@@ -92,6 +92,7 @@ function addVisualPrimitive(geometry: any, color: Color): Primitive {
         }),
         appearance: new PerInstanceColorAppearance({ flat: false, translucent: false }),
         asynchronous: false,
+        shadows: ShadowMode.ENABLED, 
     });
     viewer.scene.primitives.add(prim);
     return prim;
