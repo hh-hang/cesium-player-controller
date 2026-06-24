@@ -2,7 +2,13 @@ import type RAPIER from "@dimforge/rapier3d-compat";
 import { Cartesian3, sampleTerrainMostDetailed, Cartographic, Math as CMath, Matrix3, Matrix4, Quaternion, Transforms, HeadingPitchRoll } from "cesium";
 import { LocalFrame } from "../utils/frame";
 import { loadGltfGeometry } from "../utils/gltfGeometry";
-import type { ColliderSource, TriMeshCollider, DynamicShape } from "../types";
+import type { ColliderSource, DynamicShape } from "../types";
+
+// 内部:碰撞源(gltf/terrain)解析后得到的三角网,坐标已在 Rapier 局部空间
+type ResolvedTriMesh = {
+    positions: Float32Array | number[];
+    indices: Uint32Array | number[];
+};
 
 export interface CharacterShapeDesc {
     radius: number; // 胶囊半径
@@ -213,7 +219,7 @@ export class PhysicsSystem {
         return this.frame.rapierToEcef(next.x, next.y, next.z, outEcef);
     }
 
-    // 仅静态碰撞体(地形/glTF 等 trimesh)的调试线段 → ECEF。静态不动。
+    // 仅静态碰撞体(地形/glTF 解析出的三角网)的调试线段 → ECEF。静态不动。
     buildStaticDebugLinesEcef(): Float64Array {
         const meshes: { v: Float32Array; i: Uint32Array }[] = [];
         let triCount = 0;
@@ -484,27 +490,15 @@ export class PhysicsSystem {
         body.setNextKinematicTranslation(p);
     }
 
-    private triColliderDesc(tri: TriMeshCollider): RAPIER.ColliderDesc {
+    private triColliderDesc(tri: ResolvedTriMesh): RAPIER.ColliderDesc {
         const r = this.rapier;
         const pos = tri.positions instanceof Float32Array ? tri.positions : new Float32Array(tri.positions);
         const idx = tri.indices instanceof Uint32Array ? tri.indices : new Uint32Array(tri.indices);
         return r.ColliderDesc.trimesh(pos, idx);
     }
 
-    // 把碰撞源(trimesh / gltf / terrain)统一解析成 Rapier 局部空间的三角网。
-    private async resolveTriMesh(viewer: any, s: ColliderSource): Promise<TriMeshCollider | null> {
-        if (s.type === "trimesh") {
-            // 输入 positions 视为 ECEF,逐点映射到 Rapier 局部空间
-            const src = s.positions instanceof Float32Array ? s.positions : new Float32Array(s.positions);
-            const out = new Float32Array(src.length);
-            const c = new Cartesian3();
-            for (let i = 0; i < src.length; i += 3) {
-                c.x = src[i]; c.y = src[i + 1]; c.z = src[i + 2];
-                const rp = this.frame.ecefToRapier(c);
-                out[i] = rp.x; out[i + 1] = rp.y; out[i + 2] = rp.z;
-            }
-            return { type: "trimesh", positions: out, indices: s.indices };
-        }
+    // 把碰撞源(gltf / terrain)统一解析成 Rapier 局部空间的三角网。
+    private async resolveTriMesh(viewer: any, s: ColliderSource): Promise<ResolvedTriMesh | null> {
         if (s.type === "terrain") {
             return this.terrainToTriMesh(viewer, s.rectangle, s.resolution ?? 64);
         }
@@ -515,7 +509,7 @@ export class PhysicsSystem {
     }
 
     // glTF/glb → Rapier 三角网:模型局部几何
-    private async gltfToTriMesh(s: Extract<ColliderSource, { type: "gltf" }>): Promise<TriMeshCollider> {
+    private async gltfToTriMesh(s: Extract<ColliderSource, { type: "gltf" }>): Promise<ResolvedTriMesh> {
         const geo = await loadGltfGeometry(s.url);
 
         // 模型局部 → ECEF 的摆放矩阵
@@ -551,7 +545,7 @@ export class PhysicsSystem {
             const rp = this.frame.ecefToRapier(ecef); // ECEF → Rapier
             out[i] = rp.x; out[i + 1] = rp.y; out[i + 2] = rp.z;
         }
-        return { type: "trimesh", positions: out, indices: geo.indices };
+        return { positions: out, indices: geo.indices };
     }
 
     // 采样 Cesium 地形 → 高度场三角网(ECEF 转 Rapier)
@@ -559,7 +553,7 @@ export class PhysicsSystem {
         viewer: any,
         rect: [number, number, number, number],
         res: number,
-    ): Promise<TriMeshCollider> {
+    ): Promise<ResolvedTriMesh> {
         const provider = viewer.terrainProvider;
         // 判断是否有地形
         const hasTerrain = !!provider && !!provider.availability;
@@ -595,7 +589,7 @@ export class PhysicsSystem {
                 indices.push(a, d, b, b, d, e);
             }
         }
-        return { type: "trimesh", positions, indices: new Uint32Array(indices) };
+        return { positions, indices: new Uint32Array(indices) };
     }
 
     // 销毁物理系统

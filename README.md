@@ -488,7 +488,6 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | --- | --- | --- |
 | `terrain` | `rectangle`, `resolution?` | Cesium 地形碰撞源，`rectangle` 为 `[west, south, east, north]` 弧度。 |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB 碰撞源。 |
-| `trimesh` | `positions`, `indices` | 自定义三角网格碰撞源。 |
 
 ### `DynamicShape`
 

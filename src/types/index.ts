@@ -2,13 +2,6 @@ import type { Cartesian3, Viewer } from "cesium";
 
 // ==================== 碰撞体来源 ====================
 
-// 原始三角网
-export type TriMeshCollider = {
-    type: "trimesh";
-    positions: Float32Array | number[]; // xyz 顶点(米)
-    indices: Uint32Array | number[]; // 三角面索引
-};
-
 // glTF/glb 碰撞源:运行时 fetch + 解析出三角网
 export type GltfCollider = {
     type: "gltf";
@@ -32,7 +25,6 @@ export type TerrainCollider = {
 };
 
 export type ColliderSource =
-    | TriMeshCollider
     | GltfCollider
     | TerrainCollider;
 

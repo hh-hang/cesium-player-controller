@@ -488,7 +488,6 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | --- | --- | --- |
 | `terrain` | `rectangle`, `resolution?` | Cesium terrain collider source, `rectangle` is `[west, south, east, north]` in radians. |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB collider source. |
-| `trimesh` | `positions`, `indices` | Custom triangle mesh collider source. |
 
 ### `DynamicShape`
 
