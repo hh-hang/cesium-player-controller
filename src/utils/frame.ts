@@ -1,4 +1,4 @@
-import { Cartesian3, Math as CMath, Matrix3, Matrix4, Quaternion, Transforms } from "cesium";
+import { Cartesian3, Math as CMath, Matrix3, Matrix4, Transforms } from "cesium";
 
 // 坐标映射层:以固定锚点建 ENU 局部系
 export class LocalFrame {
@@ -140,9 +140,4 @@ export class LocalFrame {
     static wrapAngle(a: number): number {
         return CMath.negativePiToPi(a);
     }
-}
-
-// 把 ECEF 四元数姿态转给需要它的 API（预留）
-export function quatFromYaw(yaw: number, out = new Quaternion()): Quaternion {
-    return Quaternion.fromAxisAngle(Cartesian3.UNIT_Z, yaw, out);
 }
