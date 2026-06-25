@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3DGS · cesium-player-controller</title>
+    <link rel="stylesheet" href="/hud.css" />
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+
+    <div class="model-credit" role="note" aria-label="Character model attribution">
+        <span class="credit-row">
+            Character Model:
+            <a href="https://quaternius.itch.io/universal-animation-library" target="_blank" rel="noopener noreferrer">
+                Universal Animation Library
+            </a>
+        </span>
+        <span class="credit-row">
+            3DGS Asset:
+            <a href="https://sandcastle.cesium.com/?id=3d-tiles-gaussian-splatting" target="_blank" rel="noopener noreferrer">
+                Cesium ion Sample
+            </a>
+        </span>
+    </div>
+
+    <div class="hud" role="note" aria-label="Controls">
+        <div class="row hint-group">
+            <span class="hint-text">Movement:</span>
+            <kbd>W</kbd>
+            <kbd>A</kbd>
+            <kbd>S</kbd>
+            <kbd>D</kbd>
+        </div>
+        <div class="row hint-group">
+            <span class="hint-text">Boost / Drift:</span>
+            <kbd>Shift</kbd>
+        </div>
+        <div class="row hint-group">
+            <span class="hint-text">Jump / Ascend:</span>
+            <kbd>Space</kbd>
+        </div>
+        <div class="row hint-group">
+            <span class="hint-text">Toggle View:</span>
+            <kbd>V</kbd>
+        </div>
+        <div class="row hint-group">
+            <span class="hint-text">Toggle Fly Mode:</span>
+            <kbd>F</kbd>
+        </div>
+    </div>
+
+    <a class="source" href="https://github.com/hh-hang/cesium-player-controller/blob/main/example/3dgs/index.ts" target="_blank" rel="noopener noreferrer" aria-label="Source code">
+        <img src="/imgs/source.svg" alt="" />
+    </a>
+
+    <script type="module" src="./index.ts"></script>
+</body>
+</html>

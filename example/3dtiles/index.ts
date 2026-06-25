@@ -1,5 +1,5 @@
 import {
-    Cartesian3, Cesium3DTileset, Ion, PerspectiveFrustum, Viewer, Math as CMath, Cartographic, ShadowMode,
+    Cartesian3, Cesium3DTileset, PerspectiveFrustum, Viewer, Math as CMath, Cartographic, ShadowMode,
     DirectionalLight, Transforms, Matrix4, Color, Entity,
     Primitive, GeometryInstance, BoxGeometry, CylinderGeometry, VertexFormat,
     ColorGeometryInstanceAttribute, PerInstanceColorAppearance, Model,
@@ -7,8 +7,6 @@ import {
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { playerController } from "cesium-player-controller";
 import { GUI } from "lil-gui";
-
-Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmMzgwMGY3ZS1jOTMwLTQyNmQtOTkyNS03MDE4ZjlkYmY0MTYiLCJpZCI6MjIzMDk3LCJpYXQiOjE3MTg3NjgwNTN9.FcpK7jiFPzWZL8m6VxRbG7ly8LMecpXnDAMZJX_UehM";
 
 // 初始化viewer
 const viewer = new Viewer("cesiumContainer", {
