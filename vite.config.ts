@@ -19,7 +19,8 @@ export default defineConfig({
         rollupOptions: {
             input: {
                 main: resolve(__dirname, "example", "index.html"),
-                agihq: resolve(__dirname, "example", "3dtiles", "index.html"),
+                "3dtiles": resolve(__dirname, "example", "3dtiles", "index.html"),
+                "3dgs": resolve(__dirname, "example", "3dtiles", "3dgs.html"),
             },
         },
     },
