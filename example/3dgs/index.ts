@@ -46,7 +46,8 @@ async function main() {
     const spawnLat = CMath.toDegrees(carto.latitude);
 
     // 出生点
-    const initPos = Cartesian3.fromDegrees(spawnLon, spawnLat, carto.height + 10);
+    // const initPos = Cartesian3.fromDegrees(spawnLon, spawnLat, carto.height + 10);
+    const initPos = new Cartesian3(1240932.6384013514, -4727397.212936234, 4084119.2500427295);
 
     // 地形平面
     const half = 0.006;
@@ -83,7 +84,7 @@ async function main() {
             flyHoverLeftAnim: "flyHoverLeft",
             flyHoverRightAnim: "flyHoverRight",
             flyHoverUpAnim: "flyHoverUp",
-            rotateY: - Math.PI / 2,
+            rotateY: 0,
             facingOffset: Math.PI / 2,
         },
         staticCollider: [
