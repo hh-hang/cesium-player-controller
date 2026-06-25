@@ -20,7 +20,7 @@ export default defineConfig({
             input: {
                 main: resolve(__dirname, "example", "index.html"),
                 "3dtiles": resolve(__dirname, "example", "3dtiles", "index.html"),
-                "3dgs": resolve(__dirname, "example", "3dtiles", "3dgs.html"),
+                "3dgs": resolve(__dirname, "example", "3dgs", "index.html"),
             },
         },
     },
