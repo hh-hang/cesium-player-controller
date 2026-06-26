@@ -50,6 +50,8 @@ export class playerController {
     playerIsOnGround = false; // 是否在地面
     isupdate = true; // 帧更新开关
     timeScale = 1; // 时间缩放系数
+    private lastUpdateTime = 0; // 上一帧时间戳
+    currentDelta = 0; // 本帧实际使用的 delta（已钳制 + timeScale）
     isFlying = false; // 飞行状态
     enableToward = true; // 启用朝向输入
     enableOverShoulderView = false; // 越肩视角开关
@@ -229,9 +231,16 @@ export class playerController {
     // ==================== 主循环 ====================
 
     // 主循环
-    update(delta: number) {
+    update(delta?: number) {
         if (!this.isupdate || !this.model || !this.physics.world) return;
+        if (delta === undefined) {
+            const now = performance.now();
+            if (this.lastUpdateTime === 0) this.lastUpdateTime = now;
+            delta = (now - this.lastUpdateTime) / 1000;
+            this.lastUpdateTime = now;
+        }
         delta = Math.min(delta, 1 / 30) * this.timeScale;
+        this.currentDelta = delta;
         this.updatePlayer(delta);
     }
 
@@ -620,6 +629,8 @@ export class playerController {
     getIsFlying() { return this.isFlying; }
     // 获取落地状态
     getIsOnGround() { return this.playerIsOnGround; }
+    // 获取本帧实际使用的 delta（已钳制 + timeScale）
+    getCurrentDelta() { return this.currentDelta; }
     // 获取玩家模型
     getPlayerModel() { return this.model; }
     // 获取速度
