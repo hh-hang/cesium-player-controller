@@ -191,9 +191,14 @@ await player.init({
         toggleFly: ["KeyF"],                 // 切换飞行模式
     },
     isShowMobileControls: true,    // 移动端是否显示虚拟控制 UI
-    mobileControls: {              // 移动端按钮显隐（默认全部显示）
+    mobileControls: {              // 移动端按钮显隐与样式（默认全部显示）
         joystick: true,             // 是否显示摇杆，默认 true
-        jump: true,                 // 是否显示跳跃按钮，默认 true
+        jump: {                     // true 显示；对象可自定义布局和图片
+            icon: "/jump.svg",
+            right: 24,
+            bottom: 32,
+            size: 64,
+        },
         fly: true,                  // 是否显示飞行按钮，默认 true
         view: true,                 // 是否显示视角按钮，默认 true
     },
@@ -356,8 +361,8 @@ player.setKeyMap();                                      // 恢复全部默认
 
 ```ts
 player.setInput({
-    moveX: 1 | 0 | -1,    // 水平移动，1=右，-1=左
-    moveY: 1 | 0 | -1,    // 纵向移动，1=前，-1=后
+    moveX: number,         // 水平移动轴，范围 -1～1
+    moveY: number,         // 纵向移动轴，范围 -1～1
     lookDeltaX: number,   // 视角水平增量，通常来自 mousemove 的 movementX
     lookDeltaY: number,   // 视角垂直增量，通常来自 mousemove 的 movementY
     jump: boolean,        // 跳跃，持续状态；飞行时控制上升
@@ -448,7 +453,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `timeScale` | `number` | 否 | `1` | 时间缩放系数，< 1 慢动作，> 1 快进。 |
 | `keyMap` | `KeyMap` | 否 | 默认键位 | 自定义键位映射，详见[自定义键位](#自定义键位)。 |
 | `isShowMobileControls` | `boolean` | 否 | `true` | 是否在移动端显示虚拟控制 UI。 |
-| `mobileControls` | `MobileControlsOptions` | 否 | 全部显示 | 移动端按钮显隐配置。 |
+| `mobileControls` | `MobileControlsOptions` | 否 | 全部显示 | 移动端按钮显隐、位置、尺寸和图片配置。 |
 
 ### `PlayerModelOptions`
 
@@ -515,9 +520,11 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
 | `joystick` | `boolean` | 否 | `true` | 是否显示摇杆。 |
-| `jump` | `boolean` | 否 | `true` | 是否显示跳跃按钮。 |
-| `fly` | `boolean` | 否 | `true` | 是否显示飞行按钮。 |
-| `view` | `boolean` | 否 | `true` | 是否显示视角切换按钮。 |
+| `jump` | `boolean \| MobileButtonOptions` | 否 | `true` | 跳跃按钮；对象可配置位置、尺寸和图片。 |
+| `fly` | `boolean \| MobileButtonOptions` | 否 | `true` | 飞行按钮；对象可配置位置、尺寸和图片。 |
+| `view` | `boolean \| MobileButtonOptions` | 否 | `true` | 视角切换按钮；对象可配置位置、尺寸和图片。 |
+
+`MobileButtonOptions` 支持 `left`、`right`、`top`、`bottom`、`size` 和 `icon`。移动端摇杆输出 `-1～1` 连续方向轴，支持 360° 移动。
 
 # 反馈
 

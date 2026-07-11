@@ -191,9 +191,14 @@ await player.init({
         toggleFly: ["KeyF"],                 // Toggle flight mode
     },
     isShowMobileControls: true,    // Whether to show virtual controls UI on mobile
-    mobileControls: {              // Mobile button visibility (all shown by default)
+    mobileControls: {              // Mobile button visibility and appearance
         joystick: true,             // Whether to show joystick, default true
-        jump: true,                 // Whether to show jump button, default true
+        jump: {
+            icon: "/jump.svg",
+            right: 24,
+            bottom: 32,
+            size: 64,
+        },
         fly: true,                  // Whether to show fly button, default true
         view: true,                 // Whether to show view toggle button, default true
     },
@@ -356,8 +361,8 @@ player.setKeyMap();                                      // Restores all default
 
 ```ts
 player.setInput({
-    moveX: 1 | 0 | -1,    // Horizontal movement, 1=right, -1=left
-    moveY: 1 | 0 | -1,    // Vertical movement, 1=forward, -1=backward
+    moveX: number,         // Horizontal movement axis, range -1..1
+    moveY: number,         // Vertical movement axis, range -1..1
     lookDeltaX: number,   // View horizontal increment, usually from mousemove's movementX
     lookDeltaY: number,   // View vertical increment, usually from mousemove's movementY
     jump: boolean,        // Jump, continuous state; controls ascent when flying
@@ -448,7 +453,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `timeScale` | `number` | No | `1` | Time scale factor, < 1 for slow motion, > 1 for fast forward. |
 | `keyMap` | `KeyMap` | No | Default key bindings | Custom key mapping, see Custom Key Bindings. |
 | `isShowMobileControls` | `boolean` | No | `true` | Whether to display virtual control UI on mobile. |
-| `mobileControls` | `MobileControlsOptions` | No | All shown | Mobile button visibility configuration. |
+| `mobileControls` | `MobileControlsOptions` | No | All shown | Mobile button visibility, position, size, and image configuration. |
 
 ### `PlayerModelOptions`
 
@@ -515,9 +520,11 @@ Collision shape of a dynamic object. Geometry parameters are in world scale (met
 | Field | Type | Required | Default Value | Description |
 | --- | --- | --- | --- | --- |
 | `joystick` | `boolean` | No | `true` | Whether to show joystick. |
-| `jump` | `boolean` | No | `true` | Whether to show jump button. |
-| `fly` | `boolean` | No | `true` | Whether to show fly button. |
-| `view` | `boolean` | No | `true` | Whether to show view toggle button. |
+| `jump` | `boolean \| MobileButtonOptions` | No | `true` | Jump button; object form customizes position, size, and image. |
+| `fly` | `boolean \| MobileButtonOptions` | No | `true` | Flight button; object form customizes position, size, and image. |
+| `view` | `boolean \| MobileButtonOptions` | No | `true` | View button; object form customizes position, size, and image. |
+
+`MobileButtonOptions` supports `left`, `right`, `top`, `bottom`, `size`, and `icon`. The mobile joystick outputs continuous `-1..1` direction axes for full 360° movement.
 
 # Feedback
 
