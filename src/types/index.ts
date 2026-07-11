@@ -79,11 +79,20 @@ export type KeyAction =
 
 export type KeyMap = Partial<Record<KeyAction, string | string[] | null>>;
 
+export type MobileButtonOptions = {
+    left?: number; // 左侧位置(px)
+    right?: number; // 右侧位置(px)
+    top?: number; // 顶部位置(px)
+    bottom?: number; // 底部位置(px)
+    size?: number; // 按钮直径(px),默认 56
+    icon?: string; // 自定义图片 URL
+};
+
 export type MobileControlsOptions = {
     joystick?: boolean;
-    jump?: boolean;
-    fly?: boolean;
-    view?: boolean;
+    jump?: boolean | MobileButtonOptions;
+    fly?: boolean | MobileButtonOptions;
+    view?: boolean | MobileButtonOptions;
 };
 
 // ==================== 主初始化选项 ====================

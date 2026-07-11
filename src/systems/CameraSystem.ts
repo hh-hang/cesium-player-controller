@@ -72,11 +72,11 @@ export class CameraSystem {
 
     // 第三人称相机看向点
     getLookAtPoint(out = new Cartesian3()): Cartesian3 {
-        const totalH = this.ctrl.capsuleInfo.height; // 实际胶囊高度
+        const totalH = this.ctrl.capsuleInfo.height; // 角色实际总高
         const pos = this.ctrl.getPosition();
         const up = this.localUp(pos, this._up);
-        // posEcef 为 Rapier 胶囊中心，相对其抬高 (ratio - 0.5)*totalH（ratio=1 看顶，0 看底）
-        const lift = (this.lookAtHeightRatio - 0.5) * totalH;
+        // posEcef 为悬空胶囊中心；先回到脚底，再按角色总高取看向点。
+        const lift = this.lookAtHeightRatio * totalH - this.ctrl.getCapsuleGroundHeight();
         return Cartesian3.add(pos, Cartesian3.multiplyByScalar(up, lift, out), out);
     }
 

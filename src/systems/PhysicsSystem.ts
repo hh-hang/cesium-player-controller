@@ -144,6 +144,21 @@ export class PhysicsSystem {
         return hit ? hit.timeOfImpact : Infinity;
     }
 
+    // 向下射线测胶囊中心到地面的距离 + 法线（castRayAndGetNormal会轻微影响性能暂时不使用）
+    groundDistanceAndNormal(maxDist: number): { distance: number; normal: Cartesian3 } {
+        const t = this.charBody.translation();
+        const ray = new this.rapier.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
+        const hit = this.world.castRayAndGetNormal(
+            ray, maxDist, true,
+            undefined, undefined, this.charCollider, this.charBody,
+        );
+        if (!hit) return { distance: Infinity, normal: Cartesian3.ZERO };
+        // Rapier 法线 → ENU → ECEF，归一化后返回
+        const normal = LocalFrame.rapierToEnu(hit.normal.x, hit.normal.y, hit.normal.z, this._scratchNormal);
+        Cartesian3.normalize(normal, normal);
+        return { distance: hit.timeOfImpact, normal };
+    }
+
     /**
      * 任意方向 ECEF 射线测最近碰撞距离。用于相机避障：从玩家朝相机方向投射。
      * @param originEcef 射线起点（ECEF）
@@ -270,7 +285,8 @@ export class PhysicsSystem {
         // 2 个竖直轮廓环(在含 z 轴的平面,phi = 0 与 90°),stadium 参数:上/下半球用 ±hh 偏移
         for (const phi of [0, Math.PI / 2]) {
             const dx = Math.cos(phi), dy = Math.sin(phi);
-            let ph = r, pv = hh; // a = 0 起点
+            const startH = r, startV = hh;
+            let ph = startH, pv = startV; // a = 0 起点
             for (let k = 1; k <= seg; k++) {
                 const a = (k / seg) * 2 * Math.PI;
                 const h = r * Math.cos(a);
@@ -278,6 +294,8 @@ export class PhysicsSystem {
                 line(ph * dx, ph * dy, pv, h * dx, h * dy, v);
                 ph = h; pv = v;
             }
+            // 闭合轮廓，补上终点到起点这一侧的竖线。
+            line(ph * dx, ph * dy, pv, startH * dx, startH * dy, startV);
         }
         return new Float64Array(pts);
     }
@@ -543,7 +561,7 @@ export class PhysicsSystem {
             local.x = src[i]; local.y = src[i + 1]; local.z = src[i + 2];
             Matrix4.multiplyByPoint(placement, local, ecef); // 局部 → ECEF
             const rp = this.frame.ecefToRapier(ecef); // ECEF → Rapier
-            out[i] = rp.x; out[i + 1] = rp.y; out[i + 2] = rp.z;
+            out[i] = rp.x; out[i + 1] = rp.y; out[i + 2] = rp.z; 
         }
         return { positions: out, indices: geo.indices };
     }

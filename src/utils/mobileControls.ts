@@ -1,6 +1,16 @@
+import type { MobileButtonOptions, MobileControlsOptions } from "../types";
+
+type MobileButtonName = "jump" | "fly" | "view";
+
+const iconLabels: Record<MobileButtonName, string> = {
+    jump: "JUMP",
+    fly: "FLY",
+    view: "VIEW",
+};
+
 type SetInputFn = (input: Partial<{
-    moveX: 1 | 0 | -1;
-    moveY: 1 | 0 | -1;
+    moveX: number;
+    moveY: number;
     lookDeltaX: number;
     lookDeltaY: number;
     jump: boolean;
@@ -8,16 +18,6 @@ type SetInputFn = (input: Partial<{
     toggleView: boolean;
     toggleFly: boolean;
 }>) => void;
-
-// 内联 SVG 图标（data URI），白色描边，适配深色按钮底
-const svgIcon = (path: string) =>
-    `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${path}</svg>')`;
-// 实心填充版（白色填充，适合纸飞机这类剪影图标）
-const svgIconFilled = (path: string) =>
-    `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" stroke="white" stroke-width="1" stroke-linejoin="round">${path}</svg>')`;
-const jumpIcon = svgIcon('<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>'); // 上箭头
-const flyIcon = svgIconFilled('<path d="M22 2L2 11l7 2 2 7 3-5 5 3z"/><path d="M9 13l5-5"/>'); // 纸飞机
-const viewIcon = svgIcon('<circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>'); // 眼睛
 
 // 虚拟摇杆
 class VirtualJoystick {
@@ -132,10 +132,11 @@ class VirtualJoystick {
 
 export class MobileControls {
     setInput: SetInputFn; // 输入派发回调（接到 InputSystem.setInput）
+    private options: MobileControlsOptions = {};
 
     // 摇杆状态
     joystick: VirtualJoystick | null = null; // 虚拟摇杆实例
-    prevJoyState = { dirX: 0, dirY: 0, shift: false }; // 上次摇杆方向/冲刺状态（去重用）
+    prevJoyState = { moveX: 0, moveY: 0, shift: false }; // 上次摇杆方向/冲刺状态（去重用）
 
     // DOM 元素
     joystickZoneEl: HTMLDivElement | null = null; // 摇杆区域
@@ -155,11 +156,12 @@ export class MobileControls {
     }
 
     // 初始化移动端控制
-    async init(opts?: { joystick?: boolean; jump?: boolean; fly?: boolean; view?: boolean }) {
-        const showJoystick = opts?.joystick ?? true;
-        const showJump = opts?.jump ?? true;
-        const showFly = opts?.fly ?? true;
-        const showView = opts?.view ?? true;
+    async init(opts: MobileControlsOptions = {}) {
+        this.options = opts;
+        const showJoystick = opts.joystick ?? true;
+        const showJump = opts.jump !== false;
+        const showFly = opts.fly !== false;
+        const showView = opts.view !== false;
 
         const JOY_SIZE = 120;
         const container = document.body;
@@ -192,18 +194,19 @@ export class MobileControls {
                     const rawY = data.vector?.y ?? 0;
                     const distance = data.distance ?? 0;
                     const deadzone = 0.2;
-                    const dirX = rawX > deadzone ? 1 : rawX < -deadzone ? -1 : 0;
-                    const dirY = rawY > deadzone ? 1 : rawY < -deadzone ? -1 : 0;
+                    const magnitude = Math.hypot(rawX, rawY);
+                    const moveX = magnitude > deadzone ? rawX / magnitude : 0;
+                    const moveY = magnitude > deadzone ? rawY / magnitude : 0;
                     const isSprinting = distance >= JOY_SIZE / 2;
                     const prev = this.prevJoyState;
-                    if (dirX === prev.dirX && dirY === prev.dirY && isSprinting === prev.shift) return;
-                    this.prevJoyState = { dirX, dirY, shift: isSprinting };
-                    this.setInput({ moveX: dirX as any, moveY: dirY as any, shift: isSprinting });
+                    if (Math.abs(moveX - prev.moveX) < 0.0001 && Math.abs(moveY - prev.moveY) < 0.0001 && isSprinting === prev.shift) return;
+                    this.prevJoyState = { moveX, moveY, shift: isSprinting };
+                    this.setInput({ moveX, moveY, shift: isSprinting });
                 },
                 () => {
                     const prev = this.prevJoyState;
-                    if (prev.dirX !== 0 || prev.dirY !== 0 || prev.shift) {
-                        this.prevJoyState = { dirX: 0, dirY: 0, shift: false };
+                    if (prev.moveX !== 0 || prev.moveY !== 0 || prev.shift) {
+                        this.prevJoyState = { moveX: 0, moveY: 0, shift: false };
                         this.setInput({ moveX: 0, moveY: 0, shift: false });
                     }
                 },
@@ -234,17 +237,17 @@ export class MobileControls {
 
         // 创建操作按钮
         if (showJump) {
-            this.jumpBtnEl = this.createBtn(container, 14, 14, jumpIcon);
+            this.jumpBtnEl = this.createBtn(container, "jump", 14, 14);
             this.jumpBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ jump: true }); }, { passive: false });
             this.jumpBtnEl.addEventListener("touchend", (e) => { e.preventDefault(); this.setInput({ jump: false }); }, { passive: false });
             this.jumpBtnEl.addEventListener("touchcancel", (e) => { e.preventDefault(); this.setInput({ jump: false }); }, { passive: false });
         }
         if (showFly) {
-            this.flyBtnEl = this.createBtn(container, 14, 14 + 80, flyIcon);
+            this.flyBtnEl = this.createBtn(container, "fly", 14, 14 + 80);
             this.flyBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleFly: true }); }, { passive: false });
         }
         if (showView) {
-            this.viewBtnEl = this.createBtn(container, 14, 14 + 200, viewIcon);
+            this.viewBtnEl = this.createBtn(container, "view", 14, 14 + 200);
             this.viewBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleView: true }); }, { passive: false });
         }
     }
@@ -310,35 +313,107 @@ export class MobileControls {
         });
     }
 
+    private getButtonOptions(name: MobileButtonName): MobileButtonOptions | undefined {
+        const options = this.options[name];
+        return typeof options === "object" ? options : undefined;
+    }
+
     // 创建圆形按钮
-    private createBtn(container: HTMLElement, rightPx: number, bottomPx: number, bgUrl: string): HTMLButtonElement {
+    private createBtn(container: HTMLElement, name: MobileButtonName, defaultRight: number, defaultBottom: number): HTMLButtonElement {
         const btn = document.createElement("button");
+        const layout = this.getButtonOptions(name);
+        const size = layout?.size ?? 56;
+        const idleShadow = "0 6px 12px rgba(0,0,0,0.45), 0 2px 4px rgba(0,0,0,0.35), inset 0 2px 2px rgba(255,255,255,0.24), inset 0 -2px 3px rgba(0,0,0,0.5)";
+        const pressedShadow = "0 2px 5px rgba(0,0,0,0.35), inset 0 2px 4px rgba(0,0,0,0.65), inset 0 -1px 1px rgba(255,255,255,0.12)";
         Object.assign(btn.style, {
             position: "absolute",
-            right: `${rightPx}px`,
-            bottom: `${bottomPx}px`,
-            width: "56px",
-            height: "56px",
+            right: `${layout?.right ?? defaultRight}px`,
+            bottom: `${layout?.bottom ?? defaultBottom}px`,
+            width: `${size}px`,
+            height: `${size}px`,
             zIndex: "1000",
             borderRadius: "50%",
-            border: "2px solid black",
-            padding: "20px",
+            border: "1px solid rgba(255,255,255,0.45)",
+            padding: "0",
             opacity: "0.95",
             touchAction: "none",
             fontSize: "14px",
             userSelect: "none",
             overflow: "hidden",
             boxSizing: "border-box",
-            backgroundColor: "transparent",
-            backgroundRepeat: "no-repeat, no-repeat",
-            backgroundPosition: "center center, center center",
-            backgroundSize: "55% 55%, 100% 100%",
-            backgroundImage: `${bgUrl},linear-gradient(rgba(0,0,0,0.5),rgba(0,0,0,0.5))`,
+            appearance: "none",
+            WebkitAppearance: "none",
+            WebkitTapHighlightColor: "transparent",
+            background: "linear-gradient(145deg, rgba(82,82,82,0.95) 0%, rgba(34,34,34,0.96) 55%, rgba(10,10,10,0.98) 100%)",
+            boxShadow: idleShadow,
+            color: "white",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transform: "translateY(0) scale(1)",
+            transition: "transform 80ms ease, box-shadow 80ms ease, background 80ms ease",
+            willChange: "transform",
         });
+        if (layout?.left !== undefined) {
+            btn.style.left = `${layout.left}px`;
+            if (layout.right === undefined) btn.style.right = "auto";
+        }
+        if (layout?.top !== undefined) {
+            btn.style.top = `${layout.top}px`;
+            if (layout.bottom === undefined) btn.style.bottom = "auto";
+        }
+        this.setButtonIcon(btn, name);
         container.appendChild(btn);
+
+        const setPressed = (pressed: boolean) => {
+            btn.style.transform = pressed ? "translateY(2px) scale(0.98)" : "translateY(0) scale(1)";
+            btn.style.boxShadow = pressed ? pressedShadow : idleShadow;
+            btn.style.background = pressed
+                ? "linear-gradient(145deg, rgba(22,22,22,0.98), rgba(52,52,52,0.96))"
+                : "linear-gradient(145deg, rgba(82,82,82,0.95) 0%, rgba(34,34,34,0.96) 55%, rgba(10,10,10,0.98) 100%)";
+        };
+        btn.addEventListener("pointerdown", () => setPressed(true));
+        ["pointerup", "pointercancel", "pointerleave"].forEach(eventName => {
+            btn.addEventListener(eventName, () => setPressed(false));
+        });
         ["touchstart", "touchend", "touchcancel"].forEach(name => {
             btn.addEventListener(name, e => e.preventDefault(), { passive: false });
         });
         return btn;
+    }
+
+    // 自定义图片优先；未配置时使用与参考项目一致的文字图标。
+    private setButtonIcon(btn: HTMLButtonElement, name: MobileButtonName) {
+        const customIconUrl = this.getButtonOptions(name)?.icon;
+        let icon: HTMLImageElement | HTMLSpanElement;
+        if (customIconUrl !== undefined) {
+            const image = document.createElement("img");
+            image.src = customIconUrl;
+            image.alt = "";
+            image.draggable = false;
+            icon = image;
+        } else {
+            const label = document.createElement("span");
+            label.textContent = iconLabels[name];
+            icon = label;
+        }
+        Object.assign(icon.style, {
+            width: "80%",
+            height: "80%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            objectFit: "contain",
+            pointerEvents: "none",
+            flex: "none",
+            fontSize: "11px",
+            fontWeight: "700",
+            fontFamily: "system-ui, sans-serif",
+            lineHeight: "1",
+            letterSpacing: "0.04em",
+            textShadow: "0 1px 2px rgba(0,0,0,0.9)",
+        });
+        btn.replaceChildren(icon);
     }
 }

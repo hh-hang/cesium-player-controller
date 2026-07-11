@@ -43,7 +43,12 @@ export class playerController {
     private playerCapsuleRadius = 30; // 胶囊体半径
     private playerCapsuleRadiusRatio = 1; // 半径缩放比
     private playerCapsuleHeight = 180; // 胶囊体高度
-    capsuleInfo = { radius: 30, height: 180 }; // 胶囊实际尺寸（已乘 scale）
+    private readonly rideHeight = 40; // 胶囊底部相对脚底的悬空高度
+    capsuleInfo = { radius: 30, height: 180, colliderHeight: 140, rideHeight: 40 }; // 角色/胶囊实际尺寸（已乘 scale）
+
+    // ==================== 台阶视觉平滑 ====================
+    private stepSmoothFactor = 10; // 插值追赶速度，越大追得越快
+    private readonly minFloorNormalZ = Math.cos(8 * Math.PI / 180);// 最小法线 Z 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）
 
     // ==================== 运行状态 ====================
     isFirstPerson = false; // 第一人称状态
@@ -146,13 +151,15 @@ export class playerController {
         // 初始化物理世界
         await this.physics.create(this.gravity);
 
-        // 创建玩家胶囊：用临时 r/h 算实际尺寸，存入 capsuleInfo
+        // 创建悬空胶囊：角色总高不变，物理胶囊底部相对脚底悬空 rideHeight
         const r = this.playerCapsuleRadius * s * this.playerCapsuleRadiusRatio;
         const h = this.playerCapsuleHeight * s;
-        this.capsuleInfo = { radius: r, height: h };
+        const rideHeight = this.rideHeight * s;
+        const colliderHeight = h - rideHeight;
+        this.capsuleInfo = { radius: r, height: h, colliderHeight, rideHeight };
         this.physics.createCharacter(this.initPos, {
             radius: r,
-            halfHeight: Math.max(0.01, (h - 2 * r) / 2),
+            halfHeight: Math.max(0.01, (colliderHeight - 2 * r) / 2),
         }, {
             maxSlopeClimbDeg: 50,
             autostepMaxHeight: 40 * s,
@@ -210,10 +217,10 @@ export class playerController {
         const size = await getGltfBboxSize(glbBytes!, this.playerModelConfig.url);
         if (size.y > 0) this.modelScale = this.playerCapsuleHeight / size.y;
 
-        // 挂载模型：最终缩放 = modelScale * s,并下移半个胶囊高让脚对齐胶囊底（lookAt 朝向）
+        // 挂载模型：胶囊中心到脚底 = 半个碰撞高度 + 悬空高度
         const s = this.playerModelConfig.scale;
         const fwdEN = { e: Math.sin(this.yaw), n: Math.cos(this.yaw) };
-        this.frame.composeModelMatrixLookAt(this.posEcef, fwdEN, this.modelScale * s, this.model.modelMatrix, -this.capsuleInfo.height / 2, this.playerModelConfig.facingOffset ?? 0);
+        this.frame.composeModelMatrixLookAt(this.posEcef, fwdEN, this.modelScale * s, this.model.modelMatrix, -this.getCapsuleGroundHeight(), this.playerModelConfig.facingOffset ?? 0);
 
         this.animation.setup(this.model);
         return this.model;
@@ -246,16 +253,19 @@ export class playerController {
 
     // 玩家帧更新
     private updatePlayer(delta: number) {
+        // 提交上一帧的 kinematic 目标，确保后续地面检测和移动解算
+        this.physics.step();
+
         // 计算移动方向
         const camYaw = this.getCameraYaw(); // 相机水平朝向（绕 Up）
-        let dirE = 0, dirN = 0, dirU = 0;
+        let dirU = 0;
         const i = this.input;
-        // 按键移动方向（相对相机朝向）
-        if (i.fwd) { dirE += Math.sin(camYaw); dirN += Math.cos(camYaw); }
-        if (i.bkd) { dirE -= Math.sin(camYaw); dirN -= Math.cos(camYaw); }
-        if (i.lft) { dirE -= Math.cos(camYaw); dirN += Math.sin(camYaw); }
-        if (i.rgt) { dirE += Math.cos(camYaw); dirN -= Math.sin(camYaw); }
+        // 连续移动轴转为相机相对的 ENU 方向，键盘仍由 InputSystem 生成离散轴。
+        const moveAxes = i.getMoveAxes();
+        let dirE = moveAxes.y * Math.sin(camYaw) + moveAxes.x * Math.cos(camYaw);
+        let dirN = moveAxes.y * Math.cos(camYaw) - moveAxes.x * Math.sin(camYaw);
 
+        let groundCorrectionU = 0; // 贴地修正位移，与跳跃/重力速度分离
         if (this.isFlying) {
             this.curPlayerSpeed = i.shift ? this.playerFlySpeed * 2 : this.playerFlySpeed;
             // 飞行前进：沿相机视线向量（含俯仰），覆盖按键水平方向
@@ -299,9 +309,10 @@ export class playerController {
             this.velU += Math.sign(dU) * Math.min(Math.abs(dU), dirU !== 0 ? accelStep : decelStep);
         } else {
             // 地面检测
-            const snapH = this.capsuleInfo.height / 2; // 胶囊中心静止离地高度
-            const maxH = snapH * 1.2;                  // 1.2 倍容差带，吸收抖动
+            const snapH = this.getCapsuleGroundHeight();       // 悬空胶囊中心静止离地高度
+            const maxH = snapH + this.capsuleInfo.rideHeight;  // 超过一段悬空高度后判为离地
             const dist = this.physics.groundDistance(maxH * 4); // 胶囊中心到地面距离
+            // const { distance: dist, normal: groundNormal } = this.physics.groundDistance(maxH * 4);
 
             if (dist > maxH) {
                 // 离地超出容差 → 加重力下落
@@ -309,14 +320,20 @@ export class playerController {
                 this.setOnGround(false);
             } else if (this.velU <= 0) {
                 if (this.playerIsOnGround) {
-                    // 已在地面：吸附跟随地形（本帧把中心移到 groundY + snapH）
-                    this.velU = (snapH - dist) / delta;
+                    // 已在地面：悬空高度内渐进追随台阶。
+                    const correction = snapH - dist;
+                    // console.log("isFlatFloor", this.isFlatFloor(groundNormal));
+                    groundCorrectionU = Math.abs(correction) <= this.capsuleInfo.rideHeight
+                        ? correction * Math.min(1, this.stepSmoothFactor * delta)
+                        : correction;
+                    this.velU = 0;
                     this.setOnGround(true);
                 } else {
                     // 从空中落下：本帧速度能到落点才吸附，否则继续下落
                     const predicted = dist + this.velU * delta;
                     if (predicted <= snapH) {
-                        this.velU = (snapH - dist) / delta;
+                        groundCorrectionU = snapH - dist;
+                        this.velU = 0;
                         this.setOnGround(true);
                     } else {
                         this.velU += this.gravity * delta;
@@ -331,8 +348,11 @@ export class playerController {
         }
 
         // 碰撞移动
-        const desiredEnu = { e: this.velE * delta, n: this.velN * delta, u: this.velU * delta };
-        this.physics.step();
+        const desiredEnu = {
+            e: this.velE * delta,
+            n: this.velN * delta,
+            u: this.velU * delta + groundCorrectionU,
+        };
         this.physics.moveCharacter(desiredEnu, this.posEcef);
 
         // 同步已绑定视觉的动态物体位姿，未 attach 的跳过
@@ -369,7 +389,7 @@ export class playerController {
         // 更新模型变换
         const cosP = Math.cos(this.pitch);
         const fwdEN = { e: Math.sin(this.yaw) * cosP, n: Math.cos(this.yaw) * cosP, u: Math.sin(this.pitch) };
-        this.frame.composeModelMatrixLookAt(this.posEcef, fwdEN, this.modelScale * this.playerModelConfig.scale, this.model!.modelMatrix, -this.capsuleInfo.height / 2, this.playerModelConfig.facingOffset ?? 0);
+        this.frame.composeModelMatrixLookAt(this.posEcef, fwdEN, this.modelScale * this.playerModelConfig.scale, this.model!.modelMatrix, -this.getCapsuleGroundHeight(), this.playerModelConfig.facingOffset ?? 0);
 
         // 设置动画、更新混合器
         this.animation.setAnimationByPressed();
@@ -386,6 +406,11 @@ export class playerController {
     private getCameraYaw(): number {
         const d = this.getCameraDirEnu();
         return Math.atan2(d.e, d.n); // atan2(E, N)
+    }
+
+    // 胶囊中心在站立时相对脚底/地面的高度。
+    getCapsuleGroundHeight(): number {
+        return this.capsuleInfo.colliderHeight * 0.5 + this.capsuleInfo.rideHeight;
     }
 
     // 相机朝向在本地 ENU 下的单位向量 {e,n,u}（含俯仰，供飞行沿视线方向用）
@@ -408,6 +433,11 @@ export class playerController {
     }
 
     // ==================== 内部辅助 ====================
+
+    // 判断脚下地面是否为水平台面（法线接近竖直）
+    private isFlatFloor(normal: Cartesian3): boolean {
+        return normal.z >= this.minFloorNormalZ; // 大于等于最小法线 Z 分量时为水平台面
+    }
 
     // 设置落地状态
     setOnGround(val: boolean) {
@@ -522,14 +552,14 @@ export class playerController {
     // 获取玩家朝向
     getYaw() { return this.yaw; }
 
-    // 第一人称相机位置：胶囊顶部 + offset
+    // 第一人称相机位置：角色顶部 + offset
     // offset 在玩家朝向系（x=右、y=前、z=上），随 yaw 转动，乘 scale
     getHeadWorldPosition(offset?: [number, number, number]): Cartesian3 {
         const base = Cartesian3.add(
             this.posEcef,
             Cartesian3.multiplyByScalar(
                 Cartesian3.normalize(this.posEcef, new Cartesian3()),
-                this.capsuleInfo.height * 0.5,
+                this.capsuleInfo.height - this.getCapsuleGroundHeight(),
                 new Cartesian3(),
             ),
             new Cartesian3(),
@@ -556,6 +586,8 @@ export class playerController {
         this.curPlayerSpeed *= ratio;
         this.capsuleInfo.radius *= ratio;
         this.capsuleInfo.height *= ratio;
+        this.capsuleInfo.colliderHeight *= ratio;
+        this.capsuleInfo.rideHeight *= ratio;
         this.cam.epsilon *= ratio;
         this.cam.minDist *= ratio;
         this.cam.maxDist *= ratio;
@@ -563,7 +595,7 @@ export class playerController {
         this.physics.setGravity(this.gravity);
         // 重建角色胶囊 collider 尺寸
         const cr = this.capsuleInfo.radius;
-        const ch = this.capsuleInfo.height;
+        const ch = this.capsuleInfo.colliderHeight;
         this.physics.updateCharacterShape({
             radius: cr,
             halfHeight: Math.max(0.01, (ch - 2 * cr) / 2),
