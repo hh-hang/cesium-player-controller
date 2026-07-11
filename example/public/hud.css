@@ -177,3 +177,11 @@ kbd {
         font-size: 11px;
     }
 }
+
+/* 横屏手机/平板宽度可能超过 768px，按触摸设备能力隐藏桌面操作提示和源码入口。 */
+@media (hover: none) and (pointer: coarse) {
+    .hud,
+    .source {
+        display: none;
+    }
+}
