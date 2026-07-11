@@ -88,12 +88,8 @@ await player.init({
 });
 
 // Call per frame
-let last = performance.now();
 viewer.scene.preUpdate.addEventListener(() => {
-    const now = performance.now();
-    const delta = (now - last) / 1000;
-    last = now;
-    player.update(delta);
+    player.update();
 });
 ```
 
