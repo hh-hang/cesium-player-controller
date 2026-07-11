@@ -289,12 +289,8 @@ async function main() {
     }
 
     // 主循环
-    let last = performance.now();
     viewer.scene.preUpdate.addEventListener(() => {
-        const now = performance.now();
-        const delta = (now - last) / 1000;
-        last = now;
-        player.update(delta);
+        player.update();
         updateCenterRaycast();
     });
 
