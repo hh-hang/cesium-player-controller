@@ -160,6 +160,7 @@ export class playerController {
         this.physics.createCharacter(this.initPos, {
             radius: r,
             halfHeight: Math.max(0.01, (colliderHeight - 2 * r) / 2),
+            rideHeight,
         }, {
             maxSlopeClimbDeg: 50,
             autostepMaxHeight: 40 * s,
@@ -599,6 +600,7 @@ export class playerController {
         this.physics.updateCharacterShape({
             radius: cr,
             halfHeight: Math.max(0.01, (ch - 2 * cr) / 2),
+            rideHeight: this.capsuleInfo.rideHeight,
         });
         // 重建胶囊体 debug
         this.rebuildCapsuleDebug();

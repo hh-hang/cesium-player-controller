@@ -10,9 +10,31 @@ type ResolvedTriMesh = {
     indices: Uint32Array | number[];
 };
 
+// 碰撞分组位(各占一个 bit,数值互不重叠)
+const g = {
+    static: 1, // 地形/glTF
+    kinematic: 2, // 移动平台
+    dynamic: 4, // 动态刚体
+    charNav: 8, // 导航胶囊(浮空)
+    charPush: 16, // 推力碰撞体(全高)
+};
+
+// Rapier 要求:(自身组 << 16) | 可交互组
+const pack = (self: number, hit: number) => (self << 16) | hit;
+
+// 各类碰撞体最终挂上去的分组:自己是谁 + 愿意碰谁
+const ig = {
+    static: pack(g.static, g.charNav | g.dynamic), // 被导航命中,承托动态
+    kinematic: pack(g.kinematic, g.charNav | g.dynamic),
+    dynamic: pack(g.dynamic, g.static | g.kinematic | g.dynamic | g.charPush), // 只被推力碰撞体推
+    charNav: pack(g.charNav, g.static | g.kinematic), // 只走地形/平台
+    charPush: pack(g.charPush, g.dynamic), // 只推动态,不碰地形
+};
+
 export interface CharacterShapeDesc {
     radius: number; // 胶囊半径
     halfHeight: number; // 胶囊圆柱段半高
+    rideHeight: number; // 悬空高度(推力碰撞体据此探到脚底)
 }
 
 // 可被推动的动态刚体：Rapier 模拟，每帧读回位姿驱动视觉
@@ -60,8 +82,9 @@ export class PhysicsSystem {
     // 玩家
     charController!: RAPIER.KinematicCharacterController; // 玩家角色控制器
     charBody!: RAPIER.RigidBody; // 玩家胶囊刚体
-    charCollider!: RAPIER.Collider; // 玩家胶囊碰撞体
-    private shape!: CharacterShapeDesc; // 玩家胶囊形状参数(半径/半高)
+    charCollider!: RAPIER.Collider; // 导航胶囊(浮空,控制器解算用)
+    charPushCollider!: RAPIER.Collider; // 推力碰撞体(全高,step 里推动态刚体)
+    private shape!: CharacterShapeDesc; // 玩家胶囊形状参数(半径/半高/悬空高)
 
     // 碰撞体登记
     private staticColliders: RAPIER.Collider[] = []; // 静态碰撞体
@@ -104,9 +127,12 @@ export class PhysicsSystem {
         const bodyDesc = r.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z);
         this.charBody = this.world.createRigidBody(bodyDesc);
 
-        // 胶囊碰撞体(参数为圆柱段半高 + 半径),挂到上面的刚体上
-        const colDesc = r.ColliderDesc.capsule(shape.halfHeight, shape.radius);
+        // 导航胶囊:浮空,仅与静态/运动学解算
+        const colDesc = r.ColliderDesc.capsule(shape.halfHeight, shape.radius).setCollisionGroups(ig.charNav);
         this.charCollider = this.world.createCollider(colDesc, this.charBody);
+
+        // 推力碰撞体:全高贴脚底,只推动态刚体(分组隔离,不磕台阶)
+        this.charPushCollider = this.world.createCollider(this.buildPushColliderDesc(shape), this.charBody);
 
         // 角色控制器(offset = 碰撞外皮厚度)
         const offset = shape.radius * 0.05;
@@ -125,11 +151,34 @@ export class PhysicsSystem {
         this.charController.setApplyImpulsesToDynamicBodies(true);
     }
 
-    // 更新玩家胶囊尺寸
+    // 更新玩家胶囊尺寸(导航胶囊 + 推力碰撞体一并同步)
     updateCharacterShape(shape: CharacterShapeDesc) {
         this.shape = shape; // 同步缓存
         this.charCollider.setRadius(shape.radius);
         this.charCollider.setHalfHeight(shape.halfHeight);
+        // 推力碰撞体:重算全高半高与向下偏移
+        const b = this.pushColliderParams(shape);
+        this.charPushCollider.setRadius(shape.radius);
+        this.charPushCollider.setHalfHeight(b.halfHeight);
+        this.charPushCollider.setTranslationWrtParent({ x: 0, y: b.offsetY, z: 0 });
+    }
+
+    // 推力碰撞体几何:全高 = 导航高度 + rideHeight,中心下移半个悬空高
+    private pushColliderParams(shape: CharacterShapeDesc): { halfHeight: number; offsetY: number } {
+        const colliderHeight = 2 * shape.halfHeight + 2 * shape.radius;
+        const fullHeight = colliderHeight + shape.rideHeight;
+        return {
+            halfHeight: Math.max(0.01, fullHeight / 2 - shape.radius), // 胶囊圆柱段半高
+            offsetY: -shape.rideHeight / 2, // Rapier Y=Up,底部贴脚底
+        };
+    }
+
+    // 构造推力碰撞体描述
+    private buildPushColliderDesc(shape: CharacterShapeDesc): RAPIER.ColliderDesc {
+        const b = this.pushColliderParams(shape);
+        return this.rapier.ColliderDesc.capsule(b.halfHeight, shape.radius)
+            .setTranslation(0, b.offsetY, 0)
+            .setCollisionGroups(ig.charPush);
     }
 
 
@@ -222,8 +271,8 @@ export class PhysicsSystem {
     moveCharacter(desiredEnu: { e: number; n: number; u: number }, outEcef = new Cartesian3()): Cartesian3 {
         // 期望位移:ENU → Rapier 轴交换
         const desired = LocalFrame.enuToRapier(desiredEnu.e, desiredEnu.n, desiredEnu.u);
-        // 控制器解算碰撞
-        this.charController.computeColliderMovement(this.charCollider, desired);
+        // 控制器解算碰撞:只与静态/运动学求解,动态物体交由推力碰撞体处理
+        this.charController.computeColliderMovement(this.charCollider, desired, undefined, ig.charNav);
         const corrected = this.charController.computedMovement();
         // 当前位置 + 修正位移 = 下一帧目标位置
         const t = this.charBody.translation();
@@ -394,7 +443,8 @@ export class PhysicsSystem {
         const colDesc = this.makeColliderDesc(shape)
             .setDensity(opts?.density ?? 1)
             .setRestitution(opts?.restitution ?? 0.2)
-            .setFriction(opts?.friction ?? 0.6);
+            .setFriction(opts?.friction ?? 0.6)
+            .setCollisionGroups(ig.dynamic);
         const collider = this.world.createCollider(colDesc, body);
         const obj: DynamicObject = { body, collider, shape };
         this.physicsObjects.push(obj);
@@ -469,7 +519,7 @@ export class PhysicsSystem {
             if (r.status === "rejected") { console.warn(`静态碰撞源[${i}]加载失败,已跳过:`, r.reason); continue; }
             const tri = r.value;
             if (!tri) continue;
-            this.staticColliders.push(this.world.createCollider(this.triColliderDesc(tri)));
+            this.staticColliders.push(this.world.createCollider(this.triColliderDesc(tri, ig.static)));
         }
     }
 
@@ -479,7 +529,7 @@ export class PhysicsSystem {
         const tri = await this.resolveTriMesh(viewer, source);
         if (!tri) return null;
         const body = this.world.createRigidBody(r.RigidBodyDesc.kinematicPositionBased());
-        const col = this.world.createCollider(this.triColliderDesc(tri), body);
+        const col = this.world.createCollider(this.triColliderDesc(tri, ig.kinematic), body);
         this.kinematicBodies.set(body, col);
         return body;
     }
@@ -508,11 +558,11 @@ export class PhysicsSystem {
         body.setNextKinematicTranslation(p);
     }
 
-    private triColliderDesc(tri: ResolvedTriMesh): RAPIER.ColliderDesc {
+    private triColliderDesc(tri: ResolvedTriMesh, group: number): RAPIER.ColliderDesc {
         const r = this.rapier;
         const pos = tri.positions instanceof Float32Array ? tri.positions : new Float32Array(tri.positions);
         const idx = tri.indices instanceof Uint32Array ? tri.indices : new Uint32Array(tri.indices);
-        return r.ColliderDesc.trimesh(pos, idx);
+        return r.ColliderDesc.trimesh(pos, idx).setCollisionGroups(group);
     }
 
     // 把碰撞源(gltf / terrain)统一解析成 Rapier 局部空间的三角网。
