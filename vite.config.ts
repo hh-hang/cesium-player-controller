@@ -1,10 +1,10 @@
-import { cpSync } from "node:fs";
+import { cpSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import path from "node:path";
 import { defineConfig, type Plugin } from "vite";
 
-const cesiumSource = resolve(__dirname, "node_modules/cesium/Build/Cesium");
-const cesiumPublic = resolve(__dirname, "example/public/cesium");
+const cesiumSource = path.resolve(__dirname, "node_modules/cesium/Build/Cesium");
+const cesiumPublic = path.resolve(__dirname, "example/public/cesium");
 
 function copyDir(src: string, dest: string) {
     if (process.platform === "win32") {
@@ -21,18 +21,27 @@ function copyDir(src: string, dest: string) {
     cpSync(src, dest, { recursive: true });
 }
 
+function ensureCesiumPublic() {
+    if (!existsSync(path.join(cesiumSource, "Workers"))) {
+        throw new Error(
+            `Cesium static assets not found at ${cesiumSource}. Run npm install first.`,
+        );
+    }
+    copyDir(cesiumSource, cesiumPublic);
+}
+
 function copyCesium(): Plugin {
     return {
         name: "copy-cesium",
-        buildStart() {
-            copyDir(cesiumSource, cesiumPublic);
+        config() {
+            ensureCesiumPublic();
         },
     };
 }
 
 export default defineConfig({
     base: "/cesium-player-controller/",
-    root: resolve(__dirname, "example"),
+    root: path.resolve(__dirname, "example"),
     plugins: [copyCesium()],
     define: {
         CESIUM_BASE_URL: JSON.stringify("/cesium-player-controller/cesium/"),
@@ -40,7 +49,7 @@ export default defineConfig({
     server: { host: true },
     resolve: {
         alias: {
-            "cesium-player-controller": resolve(__dirname, "src/index.ts"),
+            "cesium-player-controller": path.resolve(__dirname, "src/index.ts"),
         },
     },
     build: {
@@ -48,10 +57,10 @@ export default defineConfig({
         emptyOutDir: true,
         rollupOptions: {
             input: {
-                main: resolve(__dirname, "example", "index.html"),
-                "3dtiles": resolve(__dirname, "example", "3dtiles", "index.html"),
-                "3dgs": resolve(__dirname, "example", "3dgs", "index.html"),
-                "gltf": resolve(__dirname, "example", "gltf", "index.html"),
+                main: path.resolve(__dirname, "example", "index.html"),
+                "3dtiles": path.resolve(__dirname, "example", "3dtiles", "index.html"),
+                "3dgs": path.resolve(__dirname, "example", "3dgs", "index.html"),
+                "gltf": path.resolve(__dirname, "example", "gltf", "index.html"),
             },
         },
     },
