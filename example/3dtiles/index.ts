@@ -66,12 +66,12 @@ const params = {
     centerRaycast: false,
 };
 
-// 车辆配置（Generic Sedan Car by MMC Works, CC BY 4.0）
+// 车辆配置
 const VEHICLE_CONFIG = {
     url: `${import.meta.env.BASE_URL}glb/sedan.glb`,
     scale: 0.9,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    driverSeatPosition: new Cartesian3(-0.6, 0.25, 0.4),
+    driverSeatPosition: new Cartesian3(-0.6, 0.35, 0.4),
     driverSeatRotation: 0,
     chassisRatio: 0.35,
     suspensionRestLengthRatio: 0.2,
