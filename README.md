@@ -87,6 +87,14 @@ await player.init({
     },
 });
 
+// 车辆控制初始化（可选）
+await player.loadVehicleModel({
+    url: "./glb/sedan.glb",                                        // 车辆模型 URL
+    position: Cartesian3.clone(initPos),                           // 车辆位置（ECEF）
+    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // 顺序：左前、右前、左后、右后
+    driverSeatPosition: new Cartesian3(-0.11, 0.19, 0.84),         // 驾驶位，局部坐标
+});
+
 // 每帧调用
 viewer.scene.preUpdate.addEventListener(() => {
     player.update();
@@ -122,6 +130,7 @@ await player.init({
         flyHoverRightAnim: "flyRight",    // 默认复用 flyIdleAnim
         flyHoverUpAnim: "flyUp",          // 默认复用 flyIdleAnim
         flyHoverDownAnim: "flyDown",      // 默认复用 flyIdleAnim
+        drivingAnim: "driving",           // 驾驶动画，不填则复用 idleAnim
 
         // 物理参数（可选）
         gravity: -2400,     // 重力基准值，会按 scale 缩放
@@ -185,19 +194,45 @@ await player.init({
         jump: ["Space"],                     // 跳跃
         toggleView: ["KeyV"],                // 切换视角
         toggleFly: ["KeyF"],                 // 切换飞行模式
+        toggleVehicle: ["KeyE"],             // 上 / 下车
     },
     isShowMobileControls: true,    // 移动端是否显示虚拟控制 UI
     mobileControls: {              // 移动端按钮显隐与样式（默认全部显示）
         joystick: true,             // 是否显示摇杆，默认 true
         jump: {                     // true 显示；对象可自定义布局和图片
             icon: "/jump.svg",
+            // brakeIcon: "/brake.svg",
             right: 24,
             bottom: 32,
             size: 64,
         },
         fly: true,                  // 是否显示飞行按钮，默认 true
         view: true,                 // 是否显示视角按钮，默认 true
+        vehicle: true,
     },
+});
+```
+
+#### `loadVehicleModel()`
+
+```ts
+await player.loadVehicleModel({
+    // 必填
+    url: "./glb/sedan.glb",                                        // 车辆模型 URL
+    position: Cartesian3.clone(initPos),                           // 车辆位置（ECEF）
+    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // 顺序：左前、右前、左后、右后
+    driverSeatPosition: new Cartesian3(-0.11, 0.19, 0.84),         // 驾驶位，局部坐标
+
+    // 可选
+    scale: 0.9,                                // 车辆模型缩放，默认 1
+    driverSeatRotation: 0,                     // 驾驶位水平旋转（弧度），默认 0
+    chassisRatio: 0.2,                         // 底盘高度比例，默认 0.2
+    suspensionRestLengthRatio: 0.2,            // 悬挂静止长度比例，默认 0.2
+    followVehicleDirection: true,              // 驾驶时镜头跟随车辆朝向，默认 true
+    mass: 1500,                                // 车辆质量基准值（kg），会按 scale 缩放，默认 1500
+    maxSpeed: 300,                             // 最高速度基准值（km/h），会按 scale 缩放，默认 300
+    acceleration: 8,                           // 加速度基准值（m/s²），会按 scale 缩放，默认 8
+    deceleration: 8,                           // 制动减速度基准值（m/s²），会按 scale 缩放，默认 8
 });
 ```
 
@@ -212,8 +247,10 @@ await player.init({
 | `destroy()` | 销毁控制器并移除事件监听。 |
 | `reset(pos?)` | 将角色重置到指定位置或初始位置。 |
 | `switchPlayerModel(model)` | 运行时切换角色模型，并保留当前位置和朝向。 |
+| `loadVehicleModel(opts)` | 加载车辆，可重复调用加载多辆车。 |
 | `changeView()` | 切换第一 / 第三人称视角。 |
 | `setFirstPersonCamera(vertAngle?)` | 直接进入第一人称，可指定初始垂直角度。 |
+| `setFirstPersonCameraOffset(offset)` | 运行时设置第一人称相机局部偏移，顺序为 `[右, 前, 上]`。 |
 | `addKinematicCollider(collider, source?)` | 注册运动学碰撞体。 |
 | `removeKinematicCollider(source)` | 移除已注册的运动学碰撞体。 |
 | `clearKinematicColliders()` | 移除所有运动学碰撞体。 |
@@ -270,8 +307,11 @@ viewer.scene.primitives.remove(sphere);
 | `getIsFirstPerson()` | 当前是否为第一人称。 |
 | `getIsFlying()` | 当前是否处于飞行模式。 |
 | `getIsOnGround()` | 当前是否在地面上。 |
+| `getControllerMode()` | 控制模式，`0` 为人物，`1` 为车辆。 |
 | `getPlayerModel()` | 当前加载的人物模型对象。 |
 | `getPlayerCapsule()` | 角色胶囊体尺寸信息。 |
+| `getActiveVehicle()` | 当前正在使用的车辆实例。 |
+| `getAllVehicles()` | 所有已加载车辆实例。 |
 | `getCollider()` | Rapier 角色碰撞体。 |
 | `getCurrentPlayerAnimationName()` | 当前播放的动画片段名，没有则返回 `null`。 |
 | `getCenterScreenRaycastHit()` | 屏幕中心射线检测结果，适合做瞄准或交互。 |
@@ -320,6 +360,7 @@ player.onAllEvent();  // 重新开启键盘和鼠标输入监听
 | `jump` | `Space` | 跳跃 |
 | `toggleView` | `V` | 切换视角 |
 | `toggleFly` | `F` | 切换飞行模式 |
+| `toggleVehicle` | `E` | 上车 / 下车 |
 | - | 鼠标移动 / 拖拽 | 控制视角 |
 
 ### 自定义键位
@@ -365,6 +406,7 @@ player.setInput({
     shift: boolean,       // 冲刺/加速，持续状态
     toggleView: boolean,  // 触发式，传 true 切换第一/第三人称视角
     toggleFly: boolean,   // 触发式，传 true 切换飞行模式
+    toggleVehicle: boolean, // 触发式，传 true 上车 / 下车
 });
 ```
 
@@ -422,6 +464,8 @@ player.onAnimationChange = (name) => {};       // 角色当前动画切换时触
 player.onBeforeViewChange = (isFirstPerson) => {}; // 第一 / 第三人称切换前触发
 player.onViewChange = (isFirstPerson) => {};   // 第一 / 第三人称切换后触发
 player.onGroundChange = (onGround) => {};      // 落地状态变化时触发
+player.onVehicleEnter = (vehicle) => {};       // 上车完成后触发
+player.onVehicleExit = (vehicle) => {};        // 下车完成后触发
 player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时触发
 ```
 
@@ -472,6 +516,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `flyHoverRightAnim` | `string` | 否 | `flyIdleAnim` | 飞行右移时的悬停动画名。 |
 | `flyHoverUpAnim` | `string` | 否 | `flyIdleAnim` | 飞行上升时的悬停动画名。 |
 | `flyHoverDownAnim` | `string` | 否 | `flyIdleAnim` | 飞行下降时的悬停动画名。 |
+| `drivingAnim` | `string` | 否 | `idleAnim` | 驾驶动画名，不填则复用 `idleAnim`。 |
 | `gravity` | `number` | 否 | `-2400` | 重力基准值（按 `scale` 缩放）。 |
 | `jumpHeight` | `number` | 否 | `600` | 跳跃高度基准值（按 `scale` 缩放）。 |
 | `speed` | `number` | 否 | `300` | 移动速度基准值（按 `scale` 缩放）。 |
@@ -489,6 +534,24 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | --- | --- | --- |
 | `terrain` | `rectangle`, `resolution?` | Cesium 地形碰撞源，`rectangle` 为 `[west, south, east, north]` 弧度。 |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB 碰撞源。 |
+
+### `VehicleOptions`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `url` | `string` | 是 | - | 车辆模型路径（GLB/GLTF）。 |
+| `position` | `Cartesian3` | 是 | - | 车辆初始世界坐标（ECEF）。 |
+| `wheelsNames` | `string[]` | 是 | - | 车轮节点名数组，顺序为左前、右前、左后、右后。 |
+| `scale` | `number` | 否 | `1` | 车辆模型缩放。 |
+| `driverSeatPosition` | `Cartesian3` | 是 | - | 驾驶位胶囊中心，车辆底盘局部坐标。 |
+| `driverSeatRotation` | `number` | 否 | `0` | 驾驶位相对车辆前向的水平旋转（弧度）。 |
+| `chassisRatio` | `number` | 否 | `0.2` | 底盘高度比例。 |
+| `suspensionRestLengthRatio` | `number` | 否 | `0.2` | 悬挂静止长度比例。 |
+| `followVehicleDirection` | `boolean` | 否 | `true` | 驾驶时镜头是否跟随车辆朝向。 |
+| `mass` | `number` | 否 | `1500` | 车辆质量基准值（kg，按 `scale` 缩放）。 |
+| `maxSpeed` | `number` | 否 | `300` | 最高速度基准值（km/h，按 `scale` 缩放）。 |
+| `acceleration` | `number` | 否 | `8` | 加速度基准值（m/s²，按 `scale` 缩放）。 |
+| `deceleration` | `number` | 否 | `8` | 制动减速度基准值（m/s²，按 `scale` 缩放）。 |
 
 ### `DynamicShape`
 
@@ -516,11 +579,22 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
 | `joystick` | `boolean` | 否 | `true` | 是否显示摇杆。 |
-| `jump` | `boolean \| MobileButtonOptions` | 否 | `true` | 跳跃按钮；对象可配置位置、尺寸和图片。 |
+| `jump` | `boolean \| JumpButtonOptions` | 否 | `true` | 跳跃/刹车按钮；`false` 隐藏，对象可自定义图片和布局。 |
 | `fly` | `boolean \| MobileButtonOptions` | 否 | `true` | 飞行按钮；对象可配置位置、尺寸和图片。 |
 | `view` | `boolean \| MobileButtonOptions` | 否 | `true` | 视角切换按钮；对象可配置位置、尺寸和图片。 |
+| `vehicle` | `boolean \| MobileButtonOptions` | 否 | `true` | 上下车按钮；`false` 隐藏，对象可自定义图片和布局。 |
 
-`MobileButtonOptions` 支持 `left`、`right`、`top`、`bottom`、`size` 和 `icon`。移动端摇杆输出 `-1～1` 连续方向轴，支持 360° 移动。
+### `MobileButtonOptions` / `JumpButtonOptions`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `left` / `right` | `number` | 否 | 内置位置 | 按钮距离左侧或右侧的位置（px）。设置 `left` 且未设置 `right` 时会清除默认右侧定位。 |
+| `top` / `bottom` | `number` | 否 | 内置位置 | 按钮距离顶部或底部的位置（px）。设置 `top` 且未设置 `bottom` 时会清除默认底部定位。 |
+| `size` | `number` | 否 | `56` | 圆形按钮直径（px）。 |
+| `icon` | `string` | 否 | 英文标签 | 自定义图片 URL。 |
+| `brakeIcon` | `string` | 否 | `BRAKE` 标签 | 仅用于 `JumpButtonOptions`，设置车辆模式下的刹车图片 URL。 |
+
+移动端摇杆输出 `-1～1` 连续方向轴，支持 360° 移动。
 
 # 反馈
 

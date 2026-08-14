@@ -16,7 +16,8 @@ import { PhysicsSystem } from "./systems/PhysicsSystem";
 import { InputSystem } from "./systems/InputSystem";
 import { CameraSystem } from "./systems/CameraSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
-import type { PlayerControllerOptions, PlayerModelOptions, KeyMap } from "./types";
+import { VehicleSystem } from "./systems/VehicleSystem";
+import type { PlayerControllerOptions, PlayerModelOptions, KeyMap, VehicleInstance, VehicleOptions } from "./types";
 
 function isMobileDevice() {
     return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
@@ -51,6 +52,7 @@ export class playerController {
     private readonly minFloorNormalZ = Math.cos(8 * Math.PI / 180);// 最小法线 Z 分量，地面法线与竖直夹角 ≤ 8° 视为台阶/平地（注入平滑）
 
     // ==================== 运行状态 ====================
+    controllerMode: 0 | 1 = 0; // 0步行 1载具
     isFirstPerson = false; // 第一人称状态
     playerIsOnGround = false; // 是否在地面
     isupdate = true; // 帧更新开关
@@ -80,6 +82,8 @@ export class playerController {
     onViewChange?: (isFirstPerson: boolean) => void; // 视角切换后回调
     onGroundChange?: (onGround: boolean) => void; // 落地状态回调
     onTowardChange?: (dx: number, dy: number, speed: number) => void; // 朝向变化回调
+    onVehicleEnter?: (vehicle: VehicleInstance) => void; // 上车回调
+    onVehicleExit?: (vehicle: VehicleInstance) => void; // 下车回调
 
     // ==================== 调试 ====================
     private displayCollider = false; // 显示场景碰撞体
@@ -95,6 +99,7 @@ export class playerController {
     input = new InputSystem(this); // 输入系统
     cam = new CameraSystem(this); // 相机系统
     animation = new AnimationSystem(this); // 动画系统
+    vehicle = new VehicleSystem(this); // 载具系统
 
     // ==================== 初始化 ====================
     async init(opts: PlayerControllerOptions, callback?: () => void) {
@@ -249,13 +254,27 @@ export class playerController {
         }
         delta = Math.min(delta, 1 / 30) * this.timeScale;
         this.currentDelta = delta;
-        this.updatePlayer(delta);
+        this.vehicle.preparePhysics(delta);
+        if (this.controllerMode === 1) {
+            this.physics.step(delta);
+            // 同步已绑定视觉的动态物体位姿，未 attach 的跳过
+            for (const o of this.dynamicObjects) {
+                if (o.visual) this.physics.getDynamicModelMatrix(o.body.body, o.visual.modelMatrix);
+            }
+            this.vehicle.finishPhysics(delta);
+            this.animation.update(delta);
+            this.cam.update(delta);
+            if (this.displayCollider) this.updateCapsuleDebug();
+        } else {
+            this.updatePlayer(delta);
+            this.vehicle.finishPhysics(delta);
+        }
     }
 
     // 玩家帧更新
     private updatePlayer(delta: number) {
         // 提交上一帧的 kinematic 目标，确保后续地面检测和移动解算
-        this.physics.step();
+        this.physics.step(delta);
 
         // 计算移动方向
         const camYaw = this.getCameraYaw(); // 相机水平朝向（绕 Up）
@@ -361,7 +380,7 @@ export class playerController {
             if (o.visual) this.physics.getDynamicModelMatrix(o.body.body, o.visual.modelMatrix);
         }
 
-        // 玩家朝向（对齐原库 setToward 后的朝向逻辑，按鼠标模式分支）。
+        // 按鼠标模式更新玩家朝向
         if (!this.isFirstPerson) {
             const moveYaw = Math.atan2(dirE, dirN); // 移动方向 yaw（atan2(E,N)）
             const mode = this.cam.mouseMode;
@@ -400,7 +419,21 @@ export class playerController {
 
         // 刷新调试线框
         if (this.displayCollider) { this.updateCapsuleDebug(); this.updateDynamicDebug(); }
+
+        // 移动端车辆按钮检测
+        if (this.isShowMobileControls && this.vehicle.list.length) {
+            let near = false;
+            for (const vehicle of this.vehicle.list) {
+                if (this.vehicle.isInBoardingRange(vehicle, this.posEcef)) { near = true; break; }
+            }
+            if (near !== this._isNearVehicle) {
+                this._isNearVehicle = near;
+                this.mobileControls?.syncVehicleBtn(near);
+            }
+        }
     }
+
+    private _isNearVehicle = false;
 
     // ==================== 内部辅助 ====================
     // 相机水平朝向（绕本地 Up 的 yaw）
@@ -457,8 +490,12 @@ export class playerController {
         this.syncDebugVisibility();
     }
 
+    // 获取调试显示状态
+    getDebug() { return this.displayCollider; }
+
     // 同步 debug 可见性
     syncDebugVisibility() {
+        this.vehicle.syncDebugVisibility(this.displayCollider);
         if (!this.displayCollider) {
             this.removeDebugPrimitives();
             return;
@@ -470,7 +507,8 @@ export class playerController {
             if (this.debugStaticPrimitive) this.viewer.scene.primitives.add(this.debugStaticPrimitive);
         }
         this.updateCapsuleDebug();
-        this.updateDynamicDebug();
+        if (this.controllerMode === 0) this.updateDynamicDebug();
+        else for (const o of this.dynamicObjects) this.removeDynamicDebug(o);
     }
 
     // 动态物体碰撞线框：几何只建一次（本体局部空间），每帧由物理位姿驱动 modelMatrix。
@@ -553,9 +591,70 @@ export class playerController {
     // 获取玩家朝向
     getYaw() { return this.yaw; }
 
+    // 将人物模型挂载到车辆座位点
+    syncMountedPlayer(vehicle: VehicleInstance) {
+        const chassis = this.physics.getDynamicModelMatrix(vehicle.chassisBody, new Matrix4());
+        const seatLocal = Cartesian3.multiplyByScalar(vehicle.driverSeatPosition, vehicle.scale, new Cartesian3());
+        Matrix4.multiplyByPoint(chassis, seatLocal, this.posEcef);
+        this.physics.teleportCharacter(this.posEcef);
+        if (!this.model) return;
+
+        const forward = this.vehicle.getDriverForward(vehicle, new Cartesian3());
+        const up = new Cartesian3(chassis[4], chassis[5], chassis[6]);
+        Cartesian3.normalize(up, up);
+        const right = Cartesian3.normalize(Cartesian3.cross(forward, up, new Cartesian3()), new Cartesian3());
+        let rotation = Matrix3.fromArray([
+            right.x, right.y, right.z,
+            forward.x, forward.y, forward.z,
+            up.x, up.y, up.z,
+        ], 0, new Matrix3());
+        const facingOffset = this.playerModelConfig.facingOffset ?? 0;
+        if (facingOffset !== 0) {
+            rotation = Matrix3.multiply(rotation, Matrix3.fromRotationZ(facingOffset, new Matrix3()), new Matrix3());
+        }
+        const modelPos = Cartesian3.add(
+            this.posEcef,
+            Cartesian3.multiplyByScalar(up, -this.getCapsuleGroundHeight(), new Cartesian3()),
+            new Cartesian3(),
+        );
+        Matrix4.fromRotationTranslation(rotation, modelPos, this.model.modelMatrix);
+        Matrix4.multiplyByUniformScale(this.model.modelMatrix, this.modelScale * this.playerModelConfig.scale, this.model.modelMatrix);
+    }
+
+    // 在车辆下车位置恢复人物控制
+    leaveVehicleAt(positionEcef: Cartesian3, forwardEcef: Cartesian3) {
+        Cartesian3.clone(positionEcef, this.posEcef);
+        const forwardEnu = this.frame.ecefVectorToEnu(forwardEcef, new Cartesian3());
+        this.yaw = Math.atan2(forwardEnu.x, forwardEnu.y);
+        this.pitch = 0;
+        this.resetVelocity();
+        this.physics.setCharacterEnabled(true);
+        this.physics.teleportCharacter(this.posEcef);
+        this.setOnGround(false);
+        if (this.model) {
+            const fwdEN = { e: Math.sin(this.yaw), n: Math.cos(this.yaw) };
+            this.frame.composeModelMatrixLookAt(this.posEcef, fwdEN, this.modelScale * this.playerModelConfig.scale, this.model.modelMatrix, -this.getCapsuleGroundHeight(), this.playerModelConfig.facingOffset ?? 0);
+        }
+    }
+
     // 第一人称相机位置：角色顶部 + offset
     // offset 在玩家朝向系（x=右、y=前、z=上），随 yaw 转动，乘 scale
     getHeadWorldPosition(offset?: [number, number, number]): Cartesian3 {
+        if (this.controllerMode === 1 && this.vehicle.active) {
+            const up = this.vehicle.getUp(this.vehicle.active, new Cartesian3());
+            const forward = this.vehicle.getDriverForward(this.vehicle.active, new Cartesian3());
+            const right = Cartesian3.normalize(Cartesian3.cross(forward, up, new Cartesian3()), new Cartesian3());
+            const base = Cartesian3.add(
+                this.posEcef,
+                Cartesian3.multiplyByScalar(up, this.capsuleInfo.height - this.getCapsuleGroundHeight(), new Cartesian3()),
+                new Cartesian3(),
+            );
+            const s = this.playerModelConfig.scale;
+            const [x, y, z] = offset ?? [0, 0, 0];
+            Cartesian3.add(base, Cartesian3.multiplyByScalar(right, x * s, new Cartesian3()), base);
+            Cartesian3.add(base, Cartesian3.multiplyByScalar(forward, y * s, new Cartesian3()), base);
+            return Cartesian3.add(base, Cartesian3.multiplyByScalar(up, z * s, new Cartesian3()), base);
+        }
         const base = Cartesian3.add(
             this.posEcef,
             Cartesian3.multiplyByScalar(
@@ -665,6 +764,8 @@ export class playerController {
     getIsOnGround() { return this.playerIsOnGround; }
     // 获取本帧实际使用的 delta（已钳制 + timeScale）
     getCurrentDelta() { return this.currentDelta; }
+    // 获取控制模式
+    getControllerMode() { return this.controllerMode; }
     // 获取玩家模型
     getPlayerModel() { return this.model; }
     // 获取速度
@@ -675,6 +776,10 @@ export class playerController {
     getActiveKinematicCollider() { return this.physics.activeKinematicSource; }
     // 获取碰撞体
     getCollider() { return this.physics.charCollider ?? null; }
+    // 获取当前车辆
+    getActiveVehicle() { return this.vehicle.active; }
+    // 获取所有车辆
+    getAllVehicles() { return this.vehicle.list; }
 
     // ==================== 动态物体 ====================
 
@@ -752,6 +857,10 @@ export class playerController {
     changeView() { this.cam.changeView(); }
     // 设置第一人称
     setFirstPersonCamera(v = 0) { this.cam.setFirstPerson(v); }
+    // 设置第一人称相机局部偏移
+    setFirstPersonCameraOffset(offset: [number, number, number]) {
+        this.playerModelConfig.firstPersonCameraOffset = [...offset];
+    }
     // 设置越肩视角
     setOverShoulderView(v: boolean) { this.enableOverShoulderView = v; this.cam.setOverShoulder(v); }
     // 屏幕中心检测
@@ -783,8 +892,19 @@ export class playerController {
     // 解绑输入事件
     offAllEvent() { this.input.unbindEvents(); }
 
+    // --- 车辆 ---
+    // 加载车辆模型
+    loadVehicleModel(opts: VehicleOptions) { return this.vehicle.load(opts); }
+
     // 重置玩家位置
     reset(position?: Cartesian3) {
+        if (this.controllerMode === 1) {
+            this.vehicle.stopActive();
+            this.controllerMode = 0;
+            this.physics.setCharacterEnabled(true);
+            this.mobileControls?.syncControllerModeBtn(0);
+            this.animation.playByName("idle");
+        }
         this.velE = this.velN = this.velU = 0;
         Cartesian3.clone(position ?? this.initPos, this.posEcef);
         this.physics.teleportCharacter(this.posEcef);
@@ -800,6 +920,7 @@ export class playerController {
 
         // 清除玩家对象
         if (this.model) { this.viewer.scene.primitives.remove(this.model); this.model = null; }
+        this.vehicle.destroy();
         this.clearDynamicObjects();
         this.physics.destroy();
 

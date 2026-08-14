@@ -1,11 +1,14 @@
 import type { MobileButtonOptions, MobileControlsOptions } from "../types";
 
-type MobileButtonName = "jump" | "fly" | "view";
+type MobileButtonName = "jump" | "fly" | "view" | "vehicle";
+type MobileIconName = MobileButtonName | "brake";
 
-const iconLabels: Record<MobileButtonName, string> = {
+const iconLabels: Record<MobileIconName, string> = {
     jump: "JUMP",
+    brake: "BRAKE",
     fly: "FLY",
     view: "VIEW",
+    vehicle: "CAR",
 };
 
 type SetInputFn = (input: Partial<{
@@ -17,6 +20,7 @@ type SetInputFn = (input: Partial<{
     shift: boolean;
     toggleView: boolean;
     toggleFly: boolean;
+    toggleVehicle: boolean;
 }>) => void;
 
 // 虚拟摇杆
@@ -144,6 +148,7 @@ export class MobileControls {
     jumpBtnEl: HTMLButtonElement | null = null; // 跳跃按钮
     flyBtnEl: HTMLButtonElement | null = null; // 飞行按钮
     viewBtnEl: HTMLButtonElement | null = null; // 视角切换按钮
+    vehicleBtnEl: HTMLButtonElement | null = null; // 上下车按钮
 
     // 触摸状态
     lookPointerId: number | null = null; // 视角区跟踪的指针 id
@@ -162,6 +167,7 @@ export class MobileControls {
         const showJump = opts.jump !== false;
         const showFly = opts.fly !== false;
         const showView = opts.view !== false;
+        const showVehicle = opts.vehicle !== false;
 
         const JOY_SIZE = 120;
         const container = document.body;
@@ -250,6 +256,11 @@ export class MobileControls {
             this.viewBtnEl = this.createBtn(container, "view", 14, 14 + 200);
             this.viewBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleView: true }); }, { passive: false });
         }
+        if (showVehicle) {
+            this.vehicleBtnEl = this.createBtn(container, "vehicle", 14 + 100, 14 + 120);
+            this.vehicleBtnEl.style.display = "none";
+            this.vehicleBtnEl.addEventListener("touchstart", (e) => { e.preventDefault(); this.setInput({ toggleVehicle: true }); }, { passive: false });
+        }
     }
 
     // 销毁移动端控制
@@ -266,13 +277,30 @@ export class MobileControls {
             }
 
             // 移除所有 DOM 元素
-            [this.joystickZoneEl, this.lookAreaEl, this.jumpBtnEl, this.flyBtnEl, this.viewBtnEl]
+            [this.joystickZoneEl, this.lookAreaEl, this.jumpBtnEl, this.flyBtnEl, this.viewBtnEl, this.vehicleBtnEl]
                 .forEach(el => el?.parentElement?.removeChild(el));
 
             this.joystickZoneEl = this.lookAreaEl = this.jumpBtnEl =
-                this.flyBtnEl = this.viewBtnEl = null;
+                this.flyBtnEl = this.viewBtnEl = this.vehicleBtnEl = null;
         } catch (e) {
             console.warn("销毁移动端控制时出错：", e);
+        }
+    }
+
+    // 同步车辆按钮显隐
+    syncVehicleBtn(show: boolean) {
+        if (this.vehicleBtnEl) this.vehicleBtnEl.style.display = show ? "flex" : "none";
+    }
+
+    // 同步控制模式按钮
+    syncControllerModeBtn(mode: 0 | 1) {
+        if (!this.jumpBtnEl) return;
+        if (mode === 0) {
+            if (this.flyBtnEl) this.flyBtnEl.style.display = "flex";
+            this.setButtonIcon(this.jumpBtnEl, "jump");
+        } else {
+            if (this.flyBtnEl) this.flyBtnEl.style.display = "none";
+            this.setButtonIcon(this.jumpBtnEl, "brake");
         }
     }
 
@@ -316,6 +344,14 @@ export class MobileControls {
     private getButtonOptions(name: MobileButtonName): MobileButtonOptions | undefined {
         const options = this.options[name];
         return typeof options === "object" ? options : undefined;
+    }
+
+    private getIconUrl(iconName: MobileIconName): string | undefined {
+        if (iconName === "brake") {
+            const jumpOptions = this.options.jump;
+            return typeof jumpOptions === "object" ? jumpOptions.brakeIcon : undefined;
+        }
+        return this.getButtonOptions(iconName)?.icon;
     }
 
     // 创建圆形按钮
@@ -383,9 +419,9 @@ export class MobileControls {
         return btn;
     }
 
-    // 自定义图片优先；未配置时使用与参考项目一致的文字图标。
-    private setButtonIcon(btn: HTMLButtonElement, name: MobileButtonName) {
-        const customIconUrl = this.getButtonOptions(name)?.icon;
+    // 自定义图片优先；未配置时显示文字图标。
+    private setButtonIcon(btn: HTMLButtonElement, name: MobileIconName) {
+        const customIconUrl = this.getIconUrl(name);
         let icon: HTMLImageElement | HTMLSpanElement;
         if (customIconUrl !== undefined) {
             const image = document.createElement("img");

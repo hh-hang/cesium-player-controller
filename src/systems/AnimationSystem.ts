@@ -53,6 +53,7 @@ export class AnimationSystem {
         def(mc.flyHoverRightAnim || mc.flyIdleAnim || mc.idleAnim, "flyHoverRight");
         def(mc.flyHoverUpAnim || mc.flyIdleAnim || mc.idleAnim, "flyHoverUp");
         def(mc.flyHoverDownAnim || mc.flyIdleAnim || mc.idleAnim, "flyHoverDown");
+        def(mc.drivingAnim || mc.idleAnim, "driving");
 
         // 跳跃动画特殊处理：三段跳分起跳/循环/落地，否则单段
         if (isThreePart) {

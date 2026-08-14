@@ -87,6 +87,14 @@ await player.init({
     },
 });
 
+// Vehicle controller initialization (optional)
+await player.loadVehicleModel({
+    url: "./glb/sedan.glb",                                        // Vehicle model URL
+    position: Cartesian3.clone(initPos),                           // Vehicle position (ECEF)
+    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // Order: front-left, front-right, rear-left, rear-right
+    driverSeatPosition: new Cartesian3(-0.11, 0.19, 0.84),         // Driver seat, local coordinates
+});
+
 // Call per frame
 viewer.scene.preUpdate.addEventListener(() => {
     player.update();
@@ -122,6 +130,7 @@ await player.init({
         flyHoverRightAnim: "flyRight",    // Defaults to flyIdleAnim
         flyHoverUpAnim: "flyUp",          // Defaults to flyIdleAnim
         flyHoverDownAnim: "flyDown",      // Defaults to flyIdleAnim
+        drivingAnim: "driving",           // Driving animation; defaults to idleAnim
 
         // Physics parameters (optional)
         gravity: -2400,     // Gravity base value, scaled by 'scale'
@@ -185,19 +194,45 @@ await player.init({
         jump: ["Space"],                     // Jump
         toggleView: ["KeyV"],                // Toggle view (first/third person)
         toggleFly: ["KeyF"],                 // Toggle flight mode
+        toggleVehicle: ["KeyE"],             // Enter / exit vehicle
     },
     isShowMobileControls: true,    // Whether to show virtual controls UI on mobile
     mobileControls: {              // Mobile button visibility and appearance
         joystick: true,             // Whether to show joystick, default true
         jump: {
             icon: "/jump.svg",
+            // brakeIcon: "/brake.svg",
             right: 24,
             bottom: 32,
             size: 64,
         },
         fly: true,                  // Whether to show fly button, default true
         view: true,                 // Whether to show view toggle button, default true
+        vehicle: true,
     },
+});
+```
+
+#### `loadVehicleModel()`
+
+```ts
+await player.loadVehicleModel({
+    // Required
+    url: "./glb/sedan.glb",                                        // Vehicle model URL
+    position: Cartesian3.clone(initPos),                           // Vehicle position (ECEF)
+    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"], // Order: front-left, front-right, rear-left, rear-right
+    driverSeatPosition: new Cartesian3(-0.11, 0.19, 0.84),         // Driver seat, local coordinates
+
+    // Optional
+    scale: 0.9,                                // Vehicle model scale, default 1
+    driverSeatRotation: 0,                     // Driver-seat horizontal rotation (radians), default 0
+    chassisRatio: 0.2,                         // Chassis height ratio, default 0.2
+    suspensionRestLengthRatio: 0.2,            // Suspension rest length ratio, default 0.2
+    followVehicleDirection: true,              // Camera follows vehicle direction while driving, default true
+    mass: 1500,                                // Vehicle mass base value (kg), scaled by 'scale', default 1500
+    maxSpeed: 300,                             // Top speed base value (km/h), scaled by 'scale', default 300
+    acceleration: 8,                           // Acceleration base value (m/s²), scaled by 'scale', default 8
+    deceleration: 8,                           // Braking deceleration base value (m/s²), scaled by 'scale', default 8
 });
 ```
 
@@ -212,8 +247,10 @@ await player.init({
 | `destroy()` | Destroys the controller and removes event listeners. |
 | `reset(pos?)` | Resets the character to a specified position or initial position. |
 | `switchPlayerModel(model)` | Switches the character model at runtime, retaining current position and orientation. |
+| `loadVehicleModel(opts)` | Loads a vehicle. Can be called multiple times for multiple vehicles. |
 | `changeView()` | Toggles between first/third-person view. |
 | `setFirstPersonCamera(vertAngle?)` | Directly enters first-person view, can specify initial vertical angle. |
+| `setFirstPersonCameraOffset(offset)` | Sets the first-person camera local offset at runtime in `[right, forward, up]` order. |
 | `addKinematicCollider(collider, source?)` | Registers a kinematic collider. |
 | `removeKinematicCollider(source)` | Removes a registered kinematic collider. |
 | `clearKinematicColliders()` | Removes all kinematic colliders. |
@@ -270,8 +307,11 @@ viewer.scene.primitives.remove(sphere);
 | `getIsFirstPerson()` | Whether currently in first-person view. |
 | `getIsFlying()` | Whether currently in flight mode. |
 | `getIsOnGround()` | Whether currently on the ground. |
+| `getControllerMode()` | `0` for player mode, `1` for vehicle mode. |
 | `getPlayerModel()` | Current loaded character model object. |
 | `getPlayerCapsule()` | Character capsule dimensions. |
+| `getActiveVehicle()` | The current vehicle instance in use. |
+| `getAllVehicles()` | All loaded vehicle instances. |
 | `getCollider()` | Rapier character collider. |
 | `getCurrentPlayerAnimationName()` | Name of the currently playing animation clip, `null` if none. |
 | `getCenterScreenRaycastHit()` | Raycast result from the center of the screen, suitable for aiming or interaction. |
@@ -320,6 +360,7 @@ player.onAllEvent();  // Re-enables keyboard and mouse input listening
 | `jump` | `Space` | Jump |
 | `toggleView` | `V` | Toggle view |
 | `toggleFly` | `F` | Toggle flight mode |
+| `toggleVehicle` | `E` | Enter / exit vehicle |
 | - | Mouse movement / drag | Control view |
 
 ### Custom Key Bindings
@@ -365,6 +406,7 @@ player.setInput({
     shift: boolean,       // Sprint/accelerate, continuous state
     toggleView: boolean,  // Triggered, pass true to toggle first/third-person view
     toggleFly: boolean,   // Triggered, pass true to toggle flight mode
+    toggleVehicle: boolean, // Triggered, pass true to enter / exit vehicle
 });
 ```
 
@@ -422,6 +464,8 @@ player.onAnimationChange = (name) => {};       // Triggered when character's cur
 player.onBeforeViewChange = (isFirstPerson) => {}; // Triggered before first/third-person view switch
 player.onViewChange = (isFirstPerson) => {};   // Triggered after first/third-person view switch
 player.onGroundChange = (onGround) => {};      // Triggered when ground state changes
+player.onVehicleEnter = (vehicle) => {};       // Triggered after entering a vehicle
+player.onVehicleExit = (vehicle) => {};        // Triggered after exiting a vehicle
 player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/view input updates
 ```
 
@@ -472,6 +516,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `flyHoverRightAnim` | `string` | No | `flyIdleAnim` | Hover animation name when flying right. |
 | `flyHoverUpAnim` | `string` | No | `flyIdleAnim` | Hover animation name when flying up. |
 | `flyHoverDownAnim` | `string` | No | `flyIdleAnim` | Hover animation name when flying down. |
+| `drivingAnim` | `string` | No | `idleAnim` | Driving animation name, defaults to `idleAnim` if not provided. |
 | `gravity` | `number` | No | `-2400` | Gravity base value (scaled by `scale`). |
 | `jumpHeight` | `number` | No | `600` | Jump height base value (scaled by `scale`). |
 | `speed` | `number` | No | `300` | Movement speed base value (scaled by `scale`). |
@@ -489,6 +534,24 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | --- | --- | --- |
 | `terrain` | `rectangle`, `resolution?` | Cesium terrain collider source, `rectangle` is `[west, south, east, north]` in radians. |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB collider source. |
+
+### `VehicleOptions`
+
+| Field | Type | Required | Default Value | Description |
+| --- | --- | --- | --- | --- |
+| `url` | `string` | Yes | - | Vehicle model path (GLB/GLTF). |
+| `position` | `Cartesian3` | Yes | - | Initial world position (ECEF). |
+| `wheelsNames` | `string[]` | Yes | - | Wheel node names in order: front-left, front-right, rear-left, rear-right. |
+| `scale` | `number` | No | `1` | Vehicle model scale. |
+| `driverSeatPosition` | `Cartesian3` | Yes | - | Driver-seat capsule center in chassis-local coordinates. |
+| `driverSeatRotation` | `number` | No | `0` | Horizontal driver-seat rotation relative to vehicle forward (radians). |
+| `chassisRatio` | `number` | No | `0.2` | Chassis height ratio. |
+| `suspensionRestLengthRatio` | `number` | No | `0.2` | Suspension rest length ratio. |
+| `followVehicleDirection` | `boolean` | No | `true` | Whether the camera follows the vehicle direction while driving. |
+| `mass` | `number` | No | `1500` | Vehicle mass base value (kg, scaled by `scale`). |
+| `maxSpeed` | `number` | No | `300` | Top speed base value (km/h, scaled by `scale`). |
+| `acceleration` | `number` | No | `8` | Acceleration base value (m/s², scaled by `scale`). |
+| `deceleration` | `number` | No | `8` | Braking deceleration base value (m/s², scaled by `scale`). |
 
 ### `DynamicShape`
 
@@ -516,11 +579,22 @@ Collision shape of a dynamic object. Geometry parameters are in world scale (met
 | Field | Type | Required | Default Value | Description |
 | --- | --- | --- | --- | --- |
 | `joystick` | `boolean` | No | `true` | Whether to show joystick. |
-| `jump` | `boolean \| MobileButtonOptions` | No | `true` | Jump button; object form customizes position, size, and image. |
+| `jump` | `boolean \| JumpButtonOptions` | No | `true` | Jump/brake button. Pass `false` to hide it or an object to customize its image and layout. |
 | `fly` | `boolean \| MobileButtonOptions` | No | `true` | Flight button; object form customizes position, size, and image. |
 | `view` | `boolean \| MobileButtonOptions` | No | `true` | View button; object form customizes position, size, and image. |
+| `vehicle` | `boolean \| MobileButtonOptions` | No | `true` | Enter/exit vehicle button. Pass `false` to hide it or an object to customize its image and layout. |
 
-`MobileButtonOptions` supports `left`, `right`, `top`, `bottom`, `size`, and `icon`. The mobile joystick outputs continuous `-1..1` direction axes for full 360° movement.
+### `MobileButtonOptions` / `JumpButtonOptions`
+
+| Field | Type | Required | Default Value | Description |
+| --- | --- | --- | --- | --- |
+| `left` / `right` | `number` | No | built-in position | Distance from the left or right edge in px. Setting `left` without `right` clears the default right position. |
+| `top` / `bottom` | `number` | No | built-in position | Distance from the top or bottom edge in px. Setting `top` without `bottom` clears the default bottom position. |
+| `size` | `number` | No | `56` | Circular button diameter in px. |
+| `icon` | `string` | No | English label | Custom image URL. |
+| `brakeIcon` | `string` | No | `BRAKE` label | Available only on `JumpButtonOptions`; sets the brake image URL used in vehicle mode. |
+
+The mobile joystick outputs continuous `-1..1` direction axes for full 360° movement.
 
 # Feedback
 

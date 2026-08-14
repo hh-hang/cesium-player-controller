@@ -1,9 +1,11 @@
 import {
     Cartesian3, PerspectiveFrustum, Viewer, Math as CMath,
-    Transforms, Matrix4, Model, ShadowMode,
+    Transforms, Matrix4, Model, ShadowMode, Ion,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { playerController } from "cesium-player-controller";
+
+Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5ZDJjMmUxZC1mZjNmLTRiNTItODkxZC02ZmUxMWYwZjFmYmEiLCJpZCI6MjIzMDk3LCJpYXQiOjE3MTg3Njc3NDR9.u83SkUcP9A9SvN3549bduETewavU8k_lSBQneyz5M0Q";
 
 // 初始化viewer
 const viewer = new Viewer("cesiumContainer", {
