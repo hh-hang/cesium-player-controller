@@ -79,7 +79,7 @@ const VEHICLE_CONFIG = {
     maxSpeed: 300,
     acceleration: 8,
     deceleration: 8,
-    followVehicleDirection: false
+    followVehicleDirection: true
 };
 
 // 自定义平行光方向参考点
@@ -297,14 +297,16 @@ async function main() {
         if (model) model.show = !isFirstPerson;
     };
 
-    // 上车回调 设置第一人称相机偏移匹配车内视角
+    // 上车回调 设置第一人称相机偏移匹配车内视角 并设置弹簧相机
     player.onVehicleEnter = (vehicle) => {
         player.setFirstPersonCameraOffset([0, -40, -60]);
+        player.cam.springCameraTime = 0.14;
     };
 
-    // 下车回调 恢复第一人称相机偏移
+    // 下车回调 恢复第一人称相机偏移 并设置弹簧相机
     player.onVehicleExit = (vehicle) => {
         player.setFirstPersonCameraOffset([0, 0, 0]);
+        player.cam.springCameraTime = 0.07;
     };
 
     // 准星射线交点可视化小球
