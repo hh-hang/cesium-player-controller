@@ -12,6 +12,7 @@ const defaultKeyMap: Record<KeyAction, string[]> = {
     jump: ["Space"],
     toggleView: ["KeyV"],
     toggleFly: ["KeyF"],
+    toggleVehicle: ["KeyE"],
 };
 
 export class InputSystem {
@@ -69,7 +70,7 @@ export class InputSystem {
         moveX: number; moveY: number;
         lookDeltaX: number; lookDeltaY: number;
         jump: boolean; shift: boolean;
-        toggleView: boolean; toggleFly: boolean;
+        toggleView: boolean; toggleFly: boolean; toggleVehicle: boolean;
     }>) {
         const c = this.ctrl;
 
@@ -85,7 +86,7 @@ export class InputSystem {
         }
         if (moveChanged) {
             this.syncDirectionFlags();
-            c.animation.setAnimationByPressed();
+            if (c.controllerMode === 0) c.animation.setAnimationByPressed();
         }
 
         // 视角朝向
@@ -100,6 +101,7 @@ export class InputSystem {
         // 触发式切换
         if (input.toggleView) this.applyAction("toggleView", true);
         if (input.toggleFly) this.applyAction("toggleFly", true);
+        if (input.toggleVehicle) this.applyAction("toggleVehicle", true);
     }
 
     // 绑定输入事件
@@ -151,7 +153,7 @@ export class InputSystem {
         this.space = false;
         this.shift = false;
         this.dragging = false;
-        this.ctrl.animation.setAnimationByPressed();
+        if (this.ctrl.controllerMode === 0) this.ctrl.animation.setAnimationByPressed();
     }
 
     // 统一动作派发
@@ -159,19 +161,20 @@ export class InputSystem {
         const c = this.ctrl;
         switch (action) {
             // 前进
-            case "forward": this.keyFwd = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
+            case "forward": this.keyFwd = pressed; this.syncDirectionFlags(); if (c.controllerMode === 0) c.animation.setAnimationByPressed(); break;
             // 后退
-            case "backward": this.keyBkd = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
+            case "backward": this.keyBkd = pressed; this.syncDirectionFlags(); if (c.controllerMode === 0) c.animation.setAnimationByPressed(); break;
             // 左移
-            case "left": this.keyLft = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
+            case "left": this.keyLft = pressed; this.syncDirectionFlags(); if (c.controllerMode === 0) c.animation.setAnimationByPressed(); break;
             // 右移
-            case "right": this.keyRgt = pressed; this.syncDirectionFlags(); c.animation.setAnimationByPressed(); break;
+            case "right": this.keyRgt = pressed; this.syncDirectionFlags(); if (c.controllerMode === 0) c.animation.setAnimationByPressed(); break;
             // 冲刺
-            case "sprint": this.shift = pressed; c.animation.setAnimationByPressed(); break;
+            case "sprint": this.shift = pressed; if (c.controllerMode === 0) c.animation.setAnimationByPressed(); break;
             // 跳跃
             case "jump":
                 if (pressed) {
                     this.space = true;
+                    if (c.controllerMode === 1) return; // 载具模式不跳跃
                     if (c.isFlying) { c.animation.setAnimationByPressed(); return; } // 飞行中仅切动画
                     if (!c.playerIsOnGround) return; // 不在地面不能跳
                     if (c.animation.isJumping()) return; // 跳跃中不重复触发
@@ -189,11 +192,18 @@ export class InputSystem {
                 break;
             // 切换飞行模式
             case "toggleFly":
-                if (pressed) {
+                if (pressed && c.controllerMode === 0) {
                     c.isFlying = !c.isFlying;
                     if (c.isFlying) c.resetVelocity();
                     c.animation.setAnimationByPressed();
                     if (!c.isFlying && !c.playerIsOnGround) c.animation.startJump(true);
+                }
+                break;
+            // 上 / 下车
+            case "toggleVehicle":
+                if (pressed) {
+                    if (c.isFlying) return;
+                    if (c.controllerMode === 0) c.vehicle.enter(); else c.vehicle.exit();
                 }
                 break;
         }
@@ -222,6 +232,7 @@ export class InputSystem {
     // 键盘按下处理
     private onKeydown(e: KeyboardEvent) {
         const action = this.codeToAction.get(e.code);
+        if (e.repeat && action === "toggleVehicle") return;
         if (action) this.applyAction(action, true);
     }
 

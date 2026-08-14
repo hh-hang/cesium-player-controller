@@ -1,4 +1,5 @@
-import type { Cartesian3, Viewer } from "cesium";
+import type { Cartesian3, Matrix4, Model, Primitive, Viewer } from "cesium";
+import type { DynamicRayCastVehicleController, RigidBody } from "@dimforge/rapier3d-compat";
 
 // ==================== 碰撞体来源 ====================
 
@@ -60,6 +61,7 @@ export type PlayerModelOptions = {
     flyHoverRightAnim?: string; // 飞行右移悬停
     flyHoverUpAnim?: string; // 飞行上升悬停
     flyHoverDownAnim?: string; // 飞行下降悬停
+    drivingAnim?: string; // 驾驶循环动画,默认复用 idleAnim
     gravity?: number; // 重力基准(按 scale 缩放),默认 -2400
     jumpHeight?: number; // 跳跃初速度基准(按 scale 缩放),默认 600
     speed?: number; // 行走速度基准(按 scale 缩放),默认 300
@@ -75,7 +77,7 @@ export type PlayerModelOptions = {
 // 可重映射的输入动作
 export type KeyAction =
     | "forward" | "backward" | "left" | "right"
-    | "sprint" | "jump" | "toggleView" | "toggleFly";
+    | "sprint" | "jump" | "toggleView" | "toggleFly" | "toggleVehicle";
 
 export type KeyMap = Partial<Record<KeyAction, string | string[] | null>>;
 
@@ -88,11 +90,16 @@ export type MobileButtonOptions = {
     icon?: string; // 自定义图片 URL
 };
 
+export type JumpButtonOptions = MobileButtonOptions & {
+    brakeIcon?: string; // 车辆模式下的刹车图片 URL
+};
+
 export type MobileControlsOptions = {
     joystick?: boolean;
-    jump?: boolean | MobileButtonOptions;
+    jump?: boolean | JumpButtonOptions;
     fly?: boolean | MobileButtonOptions;
     view?: boolean | MobileButtonOptions;
+    vehicle?: boolean | MobileButtonOptions;
 };
 
 // ==================== 主初始化选项 ====================
@@ -116,4 +123,48 @@ export type PlayerControllerOptions = {
     keyMap?: KeyMap; // 自定义键位
     isShowMobileControls?: boolean; // 移动端是否显示虚拟 UI,默认 true
     mobileControls?: MobileControlsOptions; // 移动端按钮显隐
+};
+
+// ==================== 车辆配置 ====================
+
+// 车辆模型、物理和驾驶参数
+export type VehicleOptions = {
+    url: string; // 车辆模型路径(GLB/GLTF)
+    position: Cartesian3; // 车辆初始世界坐标(ECEF)
+    wheelsNames: string[]; // 车轮节点名,顺序为左前、右前、左后、右后
+    scale?: number; // 车辆模型缩放,默认 1
+    driverSeatPosition: Cartesian3; // 驾驶位胶囊中心,使用车辆底盘局部坐标
+    driverSeatRotation?: number; // 驾驶位相对车辆前向的水平旋转(弧度),默认 0
+    chassisRatio?: number; // 底盘高度比例,默认 0.2
+    suspensionRestLengthRatio?: number; // 悬挂静止长度比例,默认 0.2
+    followVehicleDirection?: boolean; // 驾驶时镜头是否跟随车辆朝向,默认 true
+    mass?: number; // 车辆质量基准(kg,按 scale 缩放),默认 1500
+    maxSpeed?: number; // 最高速度基准(km/h,按 scale 缩放),默认 300
+    acceleration?: number; // 加速度基准(m/s²,按 scale 缩放),默认 8
+    deceleration?: number; // 制动减速度基准(m/s²,按 scale 缩放),默认 8
+};
+
+// 已加载车辆的运行时对象
+export type VehicleInstance = {
+    model: Model; // Cesium 车辆模型
+    chassisBody: RigidBody; // 底盘刚体
+    vehicleController: DynamicRayCastVehicleController; // Rapier 车辆控制器
+    updateWheelVisuals: () => void; // 同步车轮视觉的回调
+    destroyVehicleController: () => void; // 销毁车辆控制器的回调
+    visualLocalMatrix: Matrix4; // 车辆视觉相对底盘的局部矩阵
+    scale: number; // 车辆配置缩放
+    modelScale: number; // 车辆模型归一化缩放
+    driverSeatPosition: Cartesian3; // 驾驶位胶囊中心,使用车辆底盘局部坐标
+    driverSeatRotation: number; // 驾驶位相对车辆前向的水平旋转(弧度)
+    forwardLocal: Cartesian3; // 由前后轮中心推算的车辆底盘本地前向
+    chassisRatio: number; // 底盘高度比例
+    suspensionRestLengthRatio: number; // 悬挂静止长度比例
+    size: { l: number; w: number; h: number }; // 车辆尺寸(长、宽、高)
+    halfExtents: Cartesian3; // 底盘碰撞盒半边长(Rapier 局部坐标)
+    mass: number; // 车辆质量(kg)
+    maxSpeed: number; // 最高速度(km/h)
+    acceleration: number; // 加速度(m/s²)
+    deceleration: number; // 制动减速度(m/s²)
+    followVehicleDirection: boolean; // 相机是否跟随车辆方向
+    physicsBoxPrimitive?: Primitive; // 物理盒体调试图元
 };

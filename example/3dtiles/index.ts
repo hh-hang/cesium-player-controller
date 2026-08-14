@@ -2,11 +2,13 @@ import {
     Cartesian3, Cesium3DTileset, PerspectiveFrustum, Viewer, Math as CMath, Cartographic, ShadowMode,
     DirectionalLight, Transforms, Matrix4, Color, Entity,
     Primitive, GeometryInstance, BoxGeometry, CylinderGeometry, VertexFormat,
-    ColorGeometryInstanceAttribute, PerInstanceColorAppearance, Model,
+    ColorGeometryInstanceAttribute, PerInstanceColorAppearance, Model, Ion,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { playerController } from "cesium-player-controller";
 import { GUI } from "lil-gui";
+
+Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5ZDJjMmUxZC1mZjNmLTRiNTItODkxZC02ZmUxMWYwZjFmYmEiLCJpZCI6MjIzMDk3LCJpYXQiOjE3MTg3Njc3NDR9.u83SkUcP9A9SvN3549bduETewavU8k_lSBQneyz5M0Q";
 
 // 初始化viewer
 const viewer = new Viewer("cesiumContainer", {
@@ -62,6 +64,22 @@ const params = {
     debug: false,
     enableOverShoulderView: false,
     centerRaycast: false,
+};
+
+// 车辆配置（Generic Sedan Car by MMC Works, CC BY 4.0）
+const VEHICLE_CONFIG = {
+    url: `${import.meta.env.BASE_URL}glb/sedan.glb`,
+    scale: 0.9,
+    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
+    driverSeatPosition: new Cartesian3(-0.6, 0.25, 0.4),
+    driverSeatRotation: 0,
+    chassisRatio: 0.35,
+    suspensionRestLengthRatio: 0.2,
+    mass: 1500,
+    maxSpeed: 300,
+    acceleration: 8,
+    deceleration: 8,
+    followVehicleDirection: false
 };
 
 // 自定义平行光方向参考点
@@ -198,6 +216,7 @@ async function main() {
             flyHoverLeftAnim: "flyHoverLeft",
             flyHoverRightAnim: "flyHoverRight",
             flyHoverUpAnim: "flyHoverUp",
+            drivingAnim: "Driving_Loop",
             rotateY: - Math.PI / 2,
             facingOffset: Math.PI / 2,
         },
@@ -217,6 +236,15 @@ async function main() {
             },
         ],
     });
+
+    // 加载车辆
+    const vehicleEnu = Transforms.eastNorthUpToFixedFrame(initPos, undefined, new Matrix4());
+    const vehiclePos = Matrix4.multiplyByPoint(vehicleEnu, new Cartesian3(-5, 0, 0), new Cartesian3());
+    const spawned = await player.loadVehicleModel({
+        ...VEHICLE_CONFIG,
+        position: vehiclePos,
+    });
+    if (spawned) spawned.model.shadows = ShadowMode.ENABLED;
 
     // 动态物体添加到rapier世界
     {
@@ -269,6 +297,16 @@ async function main() {
         if (model) model.show = !isFirstPerson;
     };
 
+    // 上车回调 设置第一人称相机偏移匹配车内视角
+    player.onVehicleEnter = (vehicle) => {
+        player.setFirstPersonCameraOffset([0, -40, -60]);
+    };
+
+    // 下车回调 恢复第一人称相机偏移
+    player.onVehicleExit = (vehicle) => {
+        player.setFirstPersonCameraOffset([0, 0, 0]);
+    };
+
     // 准星射线交点可视化小球
     const raycastSphere = viewer.entities.add(new Entity({
         position: Cartesian3.ZERO,
@@ -302,6 +340,10 @@ function initGUI(player: playerController) {
     const gui = new GUI({ title: "Debug Panel", width: 280 });
     gui.close();
     Object.assign(gui.domElement.style, { position: "fixed", top: "12px", right: "12px", zIndex: "9999" });
+
+    ["pointerdown", "mousedown", "click"].forEach((type) => {
+        gui.domElement.addEventListener(type, (e) => e.stopPropagation());
+    });
 
     gui.add(params, "showShadow").name("Show Shadow").onChange((v: boolean) => { viewer.shadows = v; });
     gui.add(params, "mouseSensitivity", 1, 20, 0.1).onChange((v: number) => player.setMouseSensitivity(v));

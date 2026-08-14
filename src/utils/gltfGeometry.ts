@@ -1,4 +1,4 @@
-import { Matrix4 } from "cesium";
+import { Cartesian3, Matrix4 } from "cesium";
 import { load, parse } from "@loaders.gl/core";
 import { GLTFLoader, postProcessGLTF } from "@loaders.gl/gltf";
 import type { GLTFPostprocessed, GLTFNodePostprocessed } from "@loaders.gl/gltf";
@@ -6,6 +6,22 @@ import type { GLTFPostprocessed, GLTFNodePostprocessed } from "@loaders.gl/gltf"
 export interface MergedGeometry {
     positions: Float32Array; // xyz...,模型局部空间(米)
     indices: Uint32Array;
+}
+
+export interface GltfNodeInfo {
+    name: string;
+    worldMatrix: Matrix4; // 节点到模型根的变换
+    parentWorldMatrix: Matrix4; // 父节点到模型根的变换
+    min: [number, number, number]; // 节点子树包围盒下界
+    max: [number, number, number]; // 节点子树包围盒上界
+}
+
+export interface GltfModelInfo {
+    min: [number, number, number]; // 模型包围盒下界
+    max: [number, number, number]; // 模型包围盒上界
+    center: { x: number; y: number; z: number }; // 模型包围盒中心
+    size: { x: number; y: number; z: number }; // 模型包围盒尺寸
+    nodes: Map<string, GltfNodeInfo>; // 指定节点信息
 }
 
 // 从 URL 加载并解析 glTF/glb，返回合并后的三角网(模型局部空间,米)
@@ -50,6 +66,85 @@ function traverseMeshes(gltf: GLTFPostprocessed, cb: (world: Matrix4, prim: any)
     for (const n of rootNodes) visit(n, Matrix4.clone(Matrix4.IDENTITY, new Matrix4()));
 }
 
+// 解析模型包围盒与指定节点层级信息；rootTransform 用于在统计前统一转换坐标轴
+export async function getGltfModelInfo(
+    buf: ArrayBuffer,
+    url = "",
+    nodeNames: string[] = [],
+    rootTransform = Matrix4.clone(Matrix4.IDENTITY, new Matrix4()),
+): Promise<GltfModelInfo> {
+    // 只解析 JSON(loadBuffers:false，不下载/解码顶点)，min/max 即来自 accessor JSON
+    const gltf = postProcessGLTF(await parse(buf, GLTFLoader, {
+        gltf: { loadBuffers: false, loadImages: false },
+    }));
+    const wanted = new Set(nodeNames);
+    const nodes = new Map<string, GltfNodeInfo>();
+    const min: [number, number, number] = [Infinity, Infinity, Infinity]; // 整体 AABB 下界
+    const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]; // 整体 AABB 上界
+    const rootNodes: GLTFNodePostprocessed[] =
+        gltf.scene?.nodes ?? gltf.scenes?.[0]?.nodes ?? gltf.nodes ?? [];
+
+    const expand = (lo: [number, number, number], hi: [number, number, number], x: number, y: number, z: number) => {
+        if (x < lo[0]) lo[0] = x; if (x > hi[0]) hi[0] = x;
+        if (y < lo[1]) lo[1] = y; if (y > hi[1]) hi[1] = y;
+        if (z < lo[2]) lo[2] = z; if (z > hi[2]) hi[2] = z;
+    };
+
+    const visit = (
+        node: GLTFNodePostprocessed,
+        parentWorld: Matrix4,
+        owners: GltfNodeInfo[],
+    ) => {
+        const world = Matrix4.multiply(parentWorld, nodeLocalMatrix(node), new Matrix4());
+        const name = node.name ?? "";
+        const nextOwners = owners.slice();
+        if (wanted.has(name) && !nodes.has(name)) {
+            const entry: GltfNodeInfo = {
+                name,
+                worldMatrix: Matrix4.clone(world, new Matrix4()),
+                parentWorldMatrix: Matrix4.clone(parentWorld, new Matrix4()),
+                min: [Infinity, Infinity, Infinity],
+                max: [-Infinity, -Infinity, -Infinity],
+            };
+            nodes.set(name, entry);
+            nextOwners.push(entry);
+        }
+
+        if (node.mesh) {
+            const transformed = Matrix4.multiply(rootTransform, world, new Matrix4());
+            for (const prim of node.mesh.primitives) {
+                const acc = prim.attributes?.POSITION;
+                if (!acc?.min || !acc?.max) continue; // 无 min/max 的 primitive 跳过
+                // 取该 primitive 局部 AABB 的 8 个角点(c 的三位分别选 min/max),经世界变换后并入整体
+                for (let c = 0; c < 8; c++) {
+                    const p = new Cartesian3(
+                        (c & 1) ? acc.max[0] : acc.min[0],
+                        (c & 2) ? acc.max[1] : acc.min[1],
+                        (c & 4) ? acc.max[2] : acc.min[2],
+                    );
+                    // 角点 × transformed(rootTransform × world)
+                    const out = Matrix4.multiplyByPoint(transformed, p, p);
+                    expand(min, max, out.x, out.y, out.z); // 扩张整体包围盒
+                    for (const owner of nextOwners) expand(owner.min, owner.max, out.x, out.y, out.z);
+                }
+            }
+        }
+        if (node.children) for (const child of node.children) visit(child, world, nextOwners);
+    };
+
+    for (const node of rootNodes) visit(node, Matrix4.clone(Matrix4.IDENTITY, new Matrix4()), []);
+    // 没有任何带 min/max 的几何，无法估尺寸，报错(否则会返回 Infinity)
+    if (!Number.isFinite(min[1])) throw new Error(`模型 ${url} 无 POSITION min/max,无法算包围盒`);
+
+    return {
+        min,
+        max,
+        center: { x: (min[0] + max[0]) / 2, y: (min[1] + max[1]) / 2, z: (min[2] + max[2]) / 2 },
+        size: { x: max[0] - min[0], y: max[1] - min[1], z: max[2] - min[2] }, // 上界 - 下界 = 尺寸
+        nodes,
+    };
+}
+
 // 提取并合并所有 mesh 三角网(应用世界变换)
 function extractGeometry(gltf: GLTFPostprocessed, url: string): MergedGeometry {
     const allPositions: number[] = [];
@@ -92,33 +187,6 @@ function extractGeometry(gltf: GLTFPostprocessed, url: string): MergedGeometry {
 
 // 算模型 AABB 尺寸 {x,y,z}
 export async function getGltfBboxSize(buf: ArrayBuffer, url = ""): Promise<{ x: number; y: number; z: number }> {
-    // 只解析 JSON(loadBuffers:false，不下载/解码顶点)，min/max 即来自 accessor JSON
-    const gltf = postProcessGLTF(await parse(buf, GLTFLoader, {
-        gltf: { loadBuffers: false, loadImages: false },
-    }));
-    const min = [Infinity, Infinity, Infinity]; // 整体 AABB 下界
-    const max = [-Infinity, -Infinity, -Infinity]; // 整体 AABB 上界
-
-    traverseMeshes(gltf, (world, prim) => {
-        const acc = prim.attributes?.POSITION;
-        if (!acc?.min || !acc?.max) return; // 无 min/max 的 primitive 跳过
-        // 取该 primitive 局部 AABB 的 8 个角点(c 的三位分别选 min/max),经世界变换后并入整体
-        for (let c = 0; c < 8; c++) {
-            const px = (c & 1) ? acc.max[0] : acc.min[0];
-            const py = (c & 2) ? acc.max[1] : acc.min[1];
-            const pz = (c & 4) ? acc.max[2] : acc.min[2];
-            // 角点 × world(取矩阵平移列 12/13/14)
-            const wx = world[0] * px + world[4] * py + world[8] * pz + world[12];
-            const wy = world[1] * px + world[5] * py + world[9] * pz + world[13];
-            const wz = world[2] * px + world[6] * py + world[10] * pz + world[14];
-            // 扩张整体包围盒
-            if (wx < min[0]) min[0] = wx; if (wx > max[0]) max[0] = wx;
-            if (wy < min[1]) min[1] = wy; if (wy > max[1]) max[1] = wy;
-            if (wz < min[2]) min[2] = wz; if (wz > max[2]) max[2] = wz;
-        }
-    });
-
-    // 没有任何带 min/max 的几何，无法估尺寸，报错(否则会返回 Infinity)
-    if (!Number.isFinite(min[1])) throw new Error(`模型 ${url} 无 POSITION min/max,无法算包围盒`);
-    return { x: max[0] - min[0], y: max[1] - min[1], z: max[2] - min[2] }; // 上界 - 下界 = 尺寸
+    const info = await getGltfModelInfo(buf, url);
+    return info.size;
 }

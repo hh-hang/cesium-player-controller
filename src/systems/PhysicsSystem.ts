@@ -215,7 +215,7 @@ export class PhysicsSystem {
      * @param maxDist 最大检测距离（米）
      * @returns 命中距离（米）；未命中返回 Infinity
      */
-    raycastEcef(originEcef: Cartesian3, dirEcef: Cartesian3, maxDist: number): number {
+    raycastEcef(originEcef: Cartesian3, dirEcef: Cartesian3, maxDist: number, excludeBody?: RAPIER.RigidBody): number {
         // ECEF 起点/方向 → Rapier 局部系。
         const o = this.frame.ecefToRapier(originEcef);
         // 方向：ECEF → ENU 向量 → Rapier 轴交换
@@ -225,7 +225,7 @@ export class PhysicsSystem {
         const ray = new this.rapier.Ray({ x: o.x, y: o.y, z: o.z }, { x: d.x / len, y: d.y / len, z: d.z / len });
         const hit = this.world.castRay(
             ray, maxDist, true,
-            undefined, undefined, this.charCollider, this.charBody,
+            undefined, undefined, this.charCollider, excludeBody ?? this.charBody,
         );
         return hit ? hit.timeOfImpact : Infinity;
     }
@@ -239,7 +239,7 @@ export class PhysicsSystem {
      * @param maxDist 最大检测距离（米）
      * @returns { distance, point, normal }；未命中返回 undefined
      */
-    raycastEcefHit(originEcef: Cartesian3, dirEcef: Cartesian3, maxDist: number): { distance: number; point: Cartesian3; normal: Cartesian3 } | undefined {
+    raycastEcefHit(originEcef: Cartesian3, dirEcef: Cartesian3, maxDist: number, excludeBody?: RAPIER.RigidBody): { distance: number; point: Cartesian3; normal: Cartesian3 } | undefined {
         const o = this.frame.ecefToRapier(originEcef); // 起点:ECEF → Rapier 局部系
         // 方向:ECEF → ENU 向量 → Rapier 轴交换，再归一化
         const localDir = this.frame.ecefVectorToEnu(dirEcef, this._scratchDir);
@@ -249,7 +249,7 @@ export class PhysicsSystem {
         // 投射并取命中法线，排除角色自身的碰撞体/刚体
         const hit = this.world.castRayAndGetNormal(
             ray, maxDist, true,
-            undefined, undefined, this.charCollider, this.charBody,
+            undefined, undefined, this.charCollider, excludeBody ?? this.charBody,
         );
         if (!hit) return undefined; // 未命中
         // Rapier 局部命中点 → ECEF
@@ -418,8 +418,39 @@ export class PhysicsSystem {
         this.charBody.setNextKinematicTranslation(p);
     }
 
+    // 启用/禁用玩家物理；乘坐车辆时禁用,避免车内胶囊反推车身
+    setCharacterEnabled(enabled: boolean) {
+        this.charCollider.setEnabled(enabled);
+        this.charPushCollider.setEnabled(enabled);
+        this.charBody.setEnabled(enabled);
+    }
+
+    // 启用或禁用人物碰撞，刚体位置仍可由控制器更新
+    setCharacterCollisionEnabled(enabled: boolean) {
+        this.charCollider.setEnabled(enabled);
+        this.charPushCollider.setEnabled(enabled);
+    }
+
+    // 检查人物导航胶囊在指定位置是否与场景碰撞
+    isCharacterPositionFree(positionEcef: Cartesian3, excludeBody?: RAPIER.RigidBody): boolean {
+        const p = this.frame.ecefToRapier(positionEcef);
+        const shape = new this.rapier.Capsule(this.shape.halfHeight, this.shape.radius);
+        const hit = this.world.intersectionWithShape(
+            p,
+            { x: 0, y: 0, z: 0, w: 1 },
+            shape,
+            undefined,
+            undefined,
+            this.charCollider,
+            excludeBody,
+            collider => collider !== this.charPushCollider,
+        );
+        return hit === null;
+    }
+
     // 步进物理世界
-    step() {
+    step(delta?: number) {
+        if (delta !== undefined) this.world.timestep = delta;
         this.world.step();
     }
 
@@ -472,6 +503,24 @@ export class PhysicsSystem {
     getDynamicModelMatrix(body: RAPIER.RigidBody, out = new Matrix4()): Matrix4 {
         const t = body.translation();
         const q = body.rotation();
+        return this.composeRapierModelMatrix(t, q, out);
+    }
+
+    // 给定 ECEF 位置和 Rapier 局部旋转,生成与动态刚体一致的模型矩阵
+    composeRigidBodyModelMatrix(
+        positionEcef: Cartesian3,
+        rotation: { x: number; y: number; z: number; w: number } = { x: 0, y: 0, z: 0, w: 1 },
+        out = new Matrix4(),
+    ): Matrix4 {
+        return this.composeRapierModelMatrix(this.frame.ecefToRapier(positionEcef), rotation, out);
+    }
+
+    // Rapier 局部位姿 → ECEF 模型矩阵
+    private composeRapierModelMatrix(
+        t: { x: number; y: number; z: number },
+        q: { x: number; y: number; z: number; w: number },
+        out: Matrix4,
+    ): Matrix4 {
         // 平移：Rapier → ENU(Z-up)
         const enuPos = LocalFrame.rapierToEnu(t.x, t.y, t.z, this._dynScratchEnu);
         // 自转：Rapier 四元数 → 3x3，再把每一列（基向量）从 Rapier 轴换到 ENU 轴

@@ -3,6 +3,7 @@ import {
 } from "cesium";
 import type { playerController } from "../playerController";
 import { lerp } from "../utils/math";
+import { LocalFrame } from "../utils/frame";
 
 export class CameraSystem {
     private ctrl: playerController; // 主控制器引用
@@ -19,11 +20,13 @@ export class CameraSystem {
 
     enableSpringCamera = false;
     springCameraTime = 0.05;
+    vehicleTurnLerp = 0.01;
 
     // 第三人称轨道角：方位角 theta、仰角 phi
     theta = 0;
     private phi = CMath.toRadians(70);
     private fpPitch = 0; // 第一人称俯仰
+    private vehicleYawOffset = 0; // 车内第一人称水平观察偏移
 
     // 复用临时对象
     private _lastSafeDist = this.maxDist; // 上帧安全距离（lerp 用）
@@ -72,6 +75,9 @@ export class CameraSystem {
 
     // 第三人称相机看向点
     getLookAtPoint(out = new Cartesian3()): Cartesian3 {
+        if (this.ctrl.controllerMode === 1 && this.ctrl.vehicle.active) {
+            return this.ctrl.vehicle.getPosition(this.ctrl.vehicle.active, out);
+        }
         const totalH = this.ctrl.capsuleInfo.height; // 角色实际总高
         const pos = this.ctrl.getPosition();
         const up = this.localUp(pos, this._up);
@@ -108,6 +114,24 @@ export class CameraSystem {
         this.ctrl.onTowardChange?.(dx, dy, speed);
         if (!this.ctrl.enableToward) return;
         const sens = this.sensitivity;
+        if (this.ctrl.controllerMode === 1) {
+            if (this.ctrl.isFirstPerson) {
+                this.vehicleYawOffset = CMath.clamp(
+                    this.vehicleYawOffset + dx * speed * sens,
+                    -CMath.PI_OVER_FOUR,
+                    CMath.PI_OVER_FOUR,
+                );
+                this.fpPitch = CMath.clamp(
+                    this.fpPitch + (-dy * speed * sens),
+                    0,
+                    CMath.PI_OVER_THREE,
+                );
+            } else {
+                this.theta += dx * speed * sens;
+                this.phi = CMath.clamp(this.phi - dy * speed * sens, 0.1, Math.PI - 0.1);
+            }
+            return;
+        }
         if (this.ctrl.isFirstPerson) {
             // 第一人称：dx 驱动玩家 yaw ，dy 驱动相机 pitch
             this.ctrl.addYaw(dx * speed * sens);
@@ -133,6 +157,17 @@ export class CameraSystem {
         const target = this.getLookAtPoint(this._lookAtPoint);
         const smoothed = this.springTarget(target, delta);
 
+        const vehicle = this.ctrl.controllerMode === 1 ? this.ctrl.vehicle.active : null;
+        if (vehicle && (this.ctrl.input.fwd || this.ctrl.input.bkd) && vehicle.followVehicleDirection) {
+            const vel = vehicle.chassisBody.linvel();
+            if (Math.hypot(vel.x, vel.z) > 0.3) {
+                const enuVel = LocalFrame.rapierToEnu(vel.x, vel.y, vel.z, this._offWorld);
+                const targetAngle = Math.atan2(-enuVel.x, -enuVel.y);
+                const diff = Math.atan2(Math.sin(targetAngle - this.theta), Math.cos(targetAngle - this.theta));
+                this.theta += diff * this.vehicleTurnLerp;
+            }
+        }
+
         // 在目标点处建 ENU，把轨道角（theta/phi）转成 ENU 偏移，再到 ECEF
         const enu = Transforms.eastNorthUpToFixedFrame(smoothed, undefined, this._enu);
         const sinPhi = Math.sin(this.phi);
@@ -142,9 +177,10 @@ export class CameraSystem {
         offEnu.y = sinPhi * Math.cos(this.theta);
         offEnu.z = Math.cos(this.phi);
         // 相机射线避障：把上帧安全距离朝本帧瞬时安全距离插值（遮挡渐拉近、松开渐拉远）
-        const safe = this.raycastDistance(smoothed, offEnu, enu, this.maxDist);
+        const desiredMaxDist = vehicle ? Math.max(this.minDist, vehicle.size.l * 0.8) : this.maxDist;
+        const safe = this.raycastDistance(smoothed, offEnu, enu, desiredMaxDist);
         this._lastSafeDist = lerp(this._lastSafeDist, safe, this.collisionLerp);
-        const dist = Math.min(this.maxDist, this._lastSafeDist);
+        const dist = Math.min(desiredMaxDist, this._lastSafeDist);
 
         // ENU 偏移转成 ECEF 世界方向，归一化后乘安全距离，从看向点沿该方向退出得相机位置
         const offWorld = Matrix4.multiplyByPointAsVector(enu, offEnu, this._offWorld);
@@ -173,7 +209,7 @@ export class CameraSystem {
     private raycastDistance(target: Cartesian3, offEnu: Cartesian3, enu: Matrix4, maxDist: number): number {
         const dir = Matrix4.multiplyByPointAsVector(enu, offEnu, this._rayDir);
         Cartesian3.normalize(dir, dir);
-        const hitDist = this.ctrl.physics.raycastEcef(target, dir, maxDist);
+        const hitDist = this.ctrl.physics.raycastEcef(target, dir, maxDist, this.ctrl.controllerMode === 1 ? this.ctrl.vehicle.active?.chassisBody : undefined);
         if (hitDist !== Infinity) {
             return Math.max(Math.min(maxDist, hitDist - this.epsilon), this.minDist);
         }
@@ -184,6 +220,25 @@ export class CameraSystem {
     private updateFirstPerson() {
         const offset = this.ctrl.playerModelConfig.firstPersonCameraOffset;
         const head = this.ctrl.getHeadWorldPosition(offset);
+        const vehicle = this.ctrl.controllerMode === 1 ? this.ctrl.vehicle.active : null;
+        if (vehicle) {
+            const forward = this.ctrl.vehicle.getDriverForward(vehicle, this._dir);
+            const up = this.ctrl.vehicle.getUp(vehicle, this._up);
+            const right = Cartesian3.normalize(Cartesian3.cross(forward, up, this._right), this._right);
+            const horizontal = Cartesian3.add(
+                Cartesian3.multiplyByScalar(forward, Math.cos(this.vehicleYawOffset), this._offWorld),
+                Cartesian3.multiplyByScalar(right, Math.sin(this.vehicleYawOffset), this._right),
+                this._offWorld,
+            );
+            const direction = Cartesian3.add(
+                Cartesian3.multiplyByScalar(horizontal, Math.cos(this.fpPitch), horizontal),
+                Cartesian3.multiplyByScalar(up, Math.sin(this.fpPitch), this._offEnu),
+                this._dir,
+            );
+            Cartesian3.normalize(direction, direction);
+            this.camera.setView({ destination: head, orientation: { direction, up } });
+            return;
+        }
         const yaw = this.ctrl.getYaw();
         // 在 head 处建 ENU，按 yaw + pitch 求朝向
         const enu = Transforms.eastNorthUpToFixedFrame(head, undefined, this._enu);
@@ -217,7 +272,7 @@ export class CameraSystem {
 
     // 设置越肩视角：仅记录开关，实际横移在 updateThirdPerson 每帧施加。
     setOverShoulder(enable: boolean) {
-        this._overShoulder = enable && !this.ctrl.isFirstPerson;
+        this._overShoulder = enable && !this.ctrl.isFirstPerson && this.ctrl.controllerMode === 0;
     }
 
     // 指针锁定控制
@@ -239,7 +294,12 @@ export class CameraSystem {
         );
         if (!ray) return undefined;
         const dir = Cartesian3.normalize(ray.direction, this._centerDir);
-        const hit = this.ctrl.physics.raycastEcefHit(ray.origin, dir, CameraSystem.centerRayMaxDist);
+        const hit = this.ctrl.physics.raycastEcefHit(
+            ray.origin,
+            dir,
+            CameraSystem.centerRayMaxDist,
+            this.ctrl.controllerMode === 1 ? this.ctrl.vehicle.active?.chassisBody : undefined,
+        );
         if (!hit) return undefined;
         return { distance: hit.distance, position: hit.point, normal: hit.normal };
     }
