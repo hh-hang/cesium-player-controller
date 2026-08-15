@@ -236,7 +236,7 @@ async function main() {
         mass: 1500,
         maxSpeed: 300,
         acceleration: 8,
-        deceleration: 8,
+        deceleration: 30,
         followVehicleDirection: true,
     });
     if (spawned) spawned.model.shadows = ShadowMode.ENABLED;

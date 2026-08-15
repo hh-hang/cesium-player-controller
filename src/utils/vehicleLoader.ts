@@ -17,7 +17,7 @@ export type VehicleLoaderContext = {
         chassis: { mass: number; linearDamping: number; angularDamping: number };
         model: { rotation: number };
         power: { acceleration: number; deceleration: number; maxSpeed: number };
-        steering: { maxSteerAngle: number; steerSpeed: number; steerReturnTimeSlow: number; steerReturnTimeFast: number };
+        steering: { maxSteerAngle: number; steerTime: number; steerReturnTimeSlow: number; steerReturnTimeFast: number };
         followVehicleDirection: boolean;
     };
     vehicleLength: number;

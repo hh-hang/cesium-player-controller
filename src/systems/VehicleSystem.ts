@@ -21,7 +21,8 @@ export class VehicleSystem {
         chassis: { mass: 1500, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
-        steering: { maxSteerAngle: Math.PI / 4, steerSpeed: 0.5, steerReturnTimeSlow: 0.4, steerReturnTimeFast: 0.15 }, // 转向参数
+        steering: { maxSteerAngle: Math.PI / 4, steerTime: 1, steerReturnTimeSlow: 0.24, steerReturnTimeFast: 0.12 }, // 转向参数：打满/低速回正/高速回正（秒）
+        grip: { maxG: 1.2, sideFrictionIdle: 2, sideFrictionFrontMin: 1.1, sideFrictionRearMin: 0.9, handbrakeRearFriction: 0.5, wheelbaseRatio: 0.55 }, // 抓地预算
         followVehicleDirection: true, // 相机跟随方向
     };
 
@@ -187,38 +188,51 @@ export class VehicleSystem {
         const throttle = Number(c.input.fwd) - Number(c.input.bkd);
         const sinTheta = Math.max(-1, Math.min(1, forward.y));
         const extraAccel = (throttle * sinTheta > 0.05) ? Math.abs(sinTheta) * 9.81 : 0;
-
-        // 驱动力
+        const gEff = 9.81;
         const wheelCount = Math.max(1, vehicleController.numWheels());
-        const engineForce = throttle * chassisBody.mass() * (v.acceleration + extraAccel) / wheelCount;
-        for (let i = 0; i < vehicleController.numWheels(); i++) vehicleController.setWheelEngineForce(i, engineForce);
+        const mass = chassisBody.mass();
+        const linv = chassisBody.linvel();
+        const speed01 = Math.min(1, Math.hypot(linv.x, linv.z) / Math.max(0.01, v.maxSpeed / 3.6));
 
-        // 制动
-        const wheelBrake = Number(c.input.space) * chassisBody.mass() * v.deceleration / wheelCount * delta;
-        for (let i = 0; i < vehicleController.numWheels(); i++) vehicleController.setWheelBrake(i, wheelBrake);
-
-        // 转向
+        // 转向：参数为走完满舵行程的时间（秒），打方向与回正都按恒定角速度逼近
+        const { maxSteerAngle, steerTime, steerReturnTimeSlow, steerReturnTimeFast } = this.params.steering;
         const currentSteering = vehicleController.wheelSteering(0) || 0;
         const steerDir = Number(c.input.lft) - Number(c.input.rgt);
-        const targetSteering = this.params.steering.maxSteerAngle * steerDir;
-        let blend: number;
-        if (steerDir === 0) {
-            const linv = chassisBody.linvel();
-            const speed01 = Math.min(1, Math.hypot(linv.x, linv.z) / Math.max(0.01, v.maxSpeed / 3.6));
-            const returnTime = this.params.steering.steerReturnTimeSlow
-                + (this.params.steering.steerReturnTimeFast - this.params.steering.steerReturnTimeSlow) * speed01;
-            blend = 1 - Math.exp(-delta / Math.max(1e-4, returnTime));
-        } else {
-            blend = 1 - Math.pow(1 - this.params.steering.steerSpeed, delta);
-        }
-        const steering = currentSteering + (targetSteering - currentSteering) * blend;
+        const targetSteering = maxSteerAngle * steerDir;
+        const responseTime = steerDir === 0
+            ? steerReturnTimeSlow + (steerReturnTimeFast - steerReturnTimeSlow) * speed01
+            : steerTime;
+        const maxStep = maxSteerAngle / Math.max(1e-4, responseTime) * delta;
+        const steeringDelta = targetSteering - currentSteering;
+        const steering = currentSteering + Math.sign(steeringDelta) * Math.min(Math.abs(steeringDelta), maxStep);
         vehicleController.setWheelSteering(0, steering);
         vehicleController.setWheelSteering(1, steering);
 
-        // 漂移摩擦
-        const driftFriction = ((c.input.rgt || c.input.lft) && c.input.shift) ? 0.5 : 2;
-        vehicleController.setWheelSideFrictionStiffness(2, driftFriction);
-        vehicleController.setWheelSideFrictionStiffness(3, driftFriction);
+        // 抓地预算：侧向占用 latG 后削减纵向驱动力
+        const { maxG, sideFrictionIdle, sideFrictionFrontMin, sideFrictionRearMin, handbrakeRearFriction, wheelbaseRatio } = this.params.grip;
+        const vFwd = linv.x * forward.x + linv.y * forward.y + linv.z * forward.z;
+        const wheelbase = Math.max(0.01, v.size.l * wheelbaseRatio);
+        const latA = vFwd * vFwd * Math.tan(Math.min(1.5, Math.abs(steering))) / wheelbase;
+        const latG = Math.min(maxG, latA / gEff);
+        const longG = Math.sqrt(Math.max(0, maxG * maxG - latG * latG));
+        const wantedDrive = throttle * mass * (v.acceleration + extraAccel) / wheelCount;
+        const maxDrive = mass * longG * gEff / wheelCount;
+        const engineForce = throttle === 0 ? 0 : Math.sign(wantedDrive) * Math.min(Math.abs(wantedDrive), maxDrive);
+        for (let i = 0; i < wheelCount; i++) vehicleController.setWheelEngineForce(i, engineForce);
+
+        // 制动
+        const wheelBrake = Number(c.input.space) * mass * v.deceleration / wheelCount * delta;
+        for (let i = 0; i < wheelCount; i++) vehicleController.setWheelBrake(i, wheelBrake);
+
+        // 侧向刚度跟预算走；Shift 仍把后轮打到手刹摩擦
+        const gripUsed = latG / maxG;
+        const frontFriction = sideFrictionIdle + (sideFrictionFrontMin - sideFrictionIdle) * gripUsed;
+        let rearFriction = sideFrictionIdle + (sideFrictionRearMin - sideFrictionIdle) * gripUsed;
+        if (steerDir && c.input.shift) rearFriction = handbrakeRearFriction;
+        vehicleController.setWheelSideFrictionStiffness(0, frontFriction);
+        vehicleController.setWheelSideFrictionStiffness(1, frontFriction);
+        vehicleController.setWheelSideFrictionStiffness(2, rearFriction);
+        vehicleController.setWheelSideFrictionStiffness(3, rearFriction);
     }
 
     // 翻车复位
