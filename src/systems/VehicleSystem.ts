@@ -21,7 +21,7 @@ export class VehicleSystem {
         chassis: { mass: 1500, linearDamping: 0.05, angularDamping: 0.5 }, // 车身参数
         model: { rotation: -Math.PI / 2 }, // 模型旋转
         power: { acceleration: 8, deceleration: 8, maxSpeed: 300 }, // 动力参数
-        steering: { maxSteerAngle: Math.PI / 4, steerSpeed: 0.5, steerReturnSpeed: 1 }, // 转向参数
+        steering: { maxSteerAngle: Math.PI / 4, steerSpeed: 0.5, steerReturnTimeSlow: 0.4, steerReturnTimeFast: 0.15 }, // 转向参数
         followVehicleDirection: true, // 相机跟随方向
     };
 
@@ -200,9 +200,18 @@ export class VehicleSystem {
         // 转向
         const currentSteering = vehicleController.wheelSteering(0) || 0;
         const steerDir = Number(c.input.lft) - Number(c.input.rgt);
-        const steerSpeed = steerDir === 0 ? this.params.steering.steerReturnSpeed : this.params.steering.steerSpeed;
         const targetSteering = this.params.steering.maxSteerAngle * steerDir;
-        const steering = currentSteering + (targetSteering - currentSteering) * (1 - Math.pow(1 - steerSpeed, delta));
+        let blend: number;
+        if (steerDir === 0) {
+            const linv = chassisBody.linvel();
+            const speed01 = Math.min(1, Math.hypot(linv.x, linv.z) / Math.max(0.01, v.maxSpeed / 3.6));
+            const returnTime = this.params.steering.steerReturnTimeSlow
+                + (this.params.steering.steerReturnTimeFast - this.params.steering.steerReturnTimeSlow) * speed01;
+            blend = 1 - Math.exp(-delta / Math.max(1e-4, returnTime));
+        } else {
+            blend = 1 - Math.pow(1 - this.params.steering.steerSpeed, delta);
+        }
+        const steering = currentSteering + (targetSteering - currentSteering) * blend;
         vehicleController.setWheelSteering(0, steering);
         vehicleController.setWheelSteering(1, steering);
 
