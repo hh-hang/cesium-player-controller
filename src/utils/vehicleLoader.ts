@@ -142,9 +142,9 @@ export async function loadVehicleModel(
                 y: (nodeInfo.max[1] - nodeInfo.min[1]) * uniformScale,
                 z: (nodeInfo.max[2] - nodeInfo.min[2]) * uniformScale,
             };
-            wheelRadius = Number((Math.max(wheelSize.x, wheelSize.y, wheelSize.z) / 2).toFixed(2));
-            suspensionRestLength = Number((wheelRadius * 2 * suspensionRestLengthRatio).toFixed(2));
-            chassisHeight = Number((wheelRadius * 2 * chassisRatio).toFixed(2));
+            wheelRadius = Math.max(wheelSize.x, wheelSize.y, wheelSize.z) / 2;
+            suspensionRestLength = wheelRadius * 2 * suspensionRestLengthRatio;
+            chassisHeight = wheelRadius * 2 * chassisRatio;
             wheelSizeInit = true;
         }
 
@@ -196,7 +196,7 @@ export async function loadVehicleModel(
     // 创建车身物理碰撞体
     const halfExtents = {
         x: info.size.x * uniformScale * 0.5 * 0.95,
-        y: Math.max(0.01, info.size.z * uniformScale * 0.5 - chassisHeight / 2),
+        y: info.size.z * uniformScale * 0.5 - chassisHeight / 2,
         z: info.size.y * uniformScale * 0.5 * 0.95,
     };
     const p = physics.frame.ecefToRapier(opts.position);

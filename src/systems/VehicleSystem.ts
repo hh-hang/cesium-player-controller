@@ -25,7 +25,7 @@ export class VehicleSystem {
         followVehicleDirection: true, // 相机跟随方向
     };
 
-    boardingPadding = 0.25; // 上车范围在车身包围圆外增加的余量
+    boardingPadding = 0.25; // 上车/下车余量基准值（按车辆 scale 缩放）
     parkingCreepThreshold = 0.05; // 驻车状态下清除低速蠕动的水平速度阈值
 
     private chassisMatrix = new Matrix4();
@@ -46,7 +46,7 @@ export class VehicleSystem {
     boardingRadius(v: VehicleInstance): number {
         return Math.hypot(v.halfExtents.x, v.halfExtents.z)
             + this.ctrl.capsuleInfo.radius
-            + this.boardingPadding;
+            + this.boardingPadding * v.scale;
     }
 
     // 返回人物到车辆中心的水平距离，高度超出车辆邻域时返回 Infinity
@@ -239,7 +239,7 @@ export class VehicleSystem {
         Cartesian3.multiplyByScalar(v.driverSeatPosition, v.scale, this.scratchLocal);
         const seatX = Math.max(-v.halfExtents.x, Math.min(v.halfExtents.x, this.scratchLocal.x));
         const side = this.scratchLocal.z >= 0 ? 1 : -1;
-        const clearance = this.ctrl.capsuleInfo.radius + this.boardingPadding;
+        const clearance = this.ctrl.capsuleInfo.radius + this.boardingPadding * v.scale;
         const sideOffset = v.halfExtents.z + clearance;
         const endOffset = v.halfExtents.x + clearance;
         const candidates = [
@@ -304,7 +304,7 @@ export class VehicleSystem {
     getDriverForward(v: VehicleInstance, out = new Cartesian3()): Cartesian3 {
         this.ctrl.physics.getDynamicModelMatrix(v.chassisBody, this.chassisMatrix);
         Matrix3.fromRotationY(v.driverSeatRotation, this.scratchRotation);
-        Matrix3.multiplyByVector(this.scratchRotation, v.forwardLocal, this.scratchDriverForward);
+        Matrix3.multiplyByVector(this.scratchRotation, Cartesian3.negate(Cartesian3.UNIT_Z, this.scratchDriverForward), this.scratchDriverForward);
         Matrix4.multiplyByPointAsVector(this.chassisMatrix, this.scratchDriverForward, out);
         return Cartesian3.normalize(out, out);
     }

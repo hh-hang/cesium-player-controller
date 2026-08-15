@@ -66,22 +66,6 @@ const params = {
     centerRaycast: false,
 };
 
-// 车辆配置
-const VEHICLE_CONFIG = {
-    url: `${import.meta.env.BASE_URL}glb/sedan.glb`,
-    scale: 1,
-    wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    driverSeatPosition: new Cartesian3(-0.6, 0.3, 0.4),
-    driverSeatRotation: 0,
-    chassisRatio: 0.35,
-    suspensionRestLengthRatio: 0.2,
-    mass: 1500,
-    maxSpeed: 300,
-    acceleration: 8,
-    deceleration: 8,
-    followVehicleDirection: true
-};
-
 // 自定义平行光方向参考点
 let sunRefEcef = new Cartesian3();
 
@@ -241,8 +225,19 @@ async function main() {
     const vehicleEnu = Transforms.eastNorthUpToFixedFrame(initPos, undefined, new Matrix4());
     const vehiclePos = Matrix4.multiplyByPoint(vehicleEnu, new Cartesian3(-5, 0, 0), new Cartesian3());
     const spawned = await player.loadVehicleModel({
-        ...VEHICLE_CONFIG,
         position: vehiclePos,
+        url: `${import.meta.env.BASE_URL}glb/sedan.glb`,
+        scale: 1,
+        wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
+        driverSeatPosition: new Cartesian3(-0.6, 0.3, 0.4),
+        driverSeatRotation: Math.PI / 2,
+        chassisRatio: 0.35,
+        suspensionRestLengthRatio: 0.2,
+        mass: 1500,
+        maxSpeed: 300,
+        acceleration: 8,
+        deceleration: 8,
+        followVehicleDirection: true,
     });
     if (spawned) spawned.model.shadows = ShadowMode.ENABLED;
 

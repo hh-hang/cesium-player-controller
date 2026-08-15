@@ -134,7 +134,7 @@ export type VehicleOptions = {
     wheelsNames: string[]; // 车轮节点名,顺序为左前、右前、左后、右后
     scale?: number; // 车辆模型缩放,默认 1
     driverSeatPosition: Cartesian3; // 驾驶位胶囊中心,使用车辆底盘局部坐标
-    driverSeatRotation?: number; // 驾驶位相对车辆前向的水平旋转(弧度),默认 0
+    driverSeatRotation?: number; // 驾驶位相对车辆底盘局部的水平旋转(弧度),默认 0
     chassisRatio?: number; // 底盘高度比例,默认 0.2
     suspensionRestLengthRatio?: number; // 悬挂静止长度比例,默认 0.2
     followVehicleDirection?: boolean; // 驾驶时镜头是否跟随车辆朝向,默认 true
@@ -155,7 +155,7 @@ export type VehicleInstance = {
     scale: number; // 车辆配置缩放
     modelScale: number; // 车辆模型归一化缩放
     driverSeatPosition: Cartesian3; // 驾驶位胶囊中心,使用车辆底盘局部坐标
-    driverSeatRotation: number; // 驾驶位相对车辆前向的水平旋转(弧度)
+    driverSeatRotation: number; // 驾驶位相对车辆底盘局部的水平旋转(弧度)
     forwardLocal: Cartesian3; // 由前后轮中心推算的车辆底盘本地前向
     chassisRatio: number; // 底盘高度比例
     suspensionRestLengthRatio: number; // 悬挂静止长度比例
