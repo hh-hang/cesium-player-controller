@@ -69,9 +69,9 @@ const params = {
 // 车辆配置
 const VEHICLE_CONFIG = {
     url: `${import.meta.env.BASE_URL}glb/sedan.glb`,
-    scale: 0.9,
+    scale: 1,
     wheelsNames: ["Wheel_LF", "Wheel_RF", "Wheel_LR", "Wheel_RR"],
-    driverSeatPosition: new Cartesian3(-0.6, 0.35, 0.4),
+    driverSeatPosition: new Cartesian3(-0.6, 0.3, 0.4),
     driverSeatRotation: 0,
     chassisRatio: 0.35,
     suspensionRestLengthRatio: 0.2,
@@ -245,6 +245,11 @@ async function main() {
         position: vehiclePos,
     });
     if (spawned) spawned.model.shadows = ShadowMode.ENABLED;
+
+    window.addEventListener("keydown", (e) => {
+        if (e.code !== "KeyR" || e.repeat) return;
+        player.resetVehicle();
+    });
 
     // 动态物体添加到rapier世界
     {

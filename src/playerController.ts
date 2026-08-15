@@ -895,6 +895,8 @@ export class playerController {
     // --- 车辆 ---
     // 加载车辆模型
     loadVehicleModel(opts: VehicleOptions) { return this.vehicle.load(opts); }
+    // 将当前驾驶车辆翻正复位
+    resetVehicle() { this.vehicle.resetUpright(); }
 
     // 重置玩家位置
     reset(position?: Cartesian3) {

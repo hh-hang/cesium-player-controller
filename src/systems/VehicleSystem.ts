@@ -25,12 +25,6 @@ export class VehicleSystem {
         followVehicleDirection: true, // 相机跟随方向
     };
 
-    // ==================== 防卡死自动脱困 ====================
-    stuckTimer = 0; // 卡住计时器
-    stuckSpeedThreshold = 0.5; // 视为"几乎不动"的水平速度阈值
-    stuckTimeThreshold = 1; // 持续多久判定卡住（秒）
-    stuckHopRatio = 0.5; // 脱困向上冲量对应的抬升高度 = 车高 × 此值
-
     boardingPadding = 0.25; // 上车范围在车身包围圆外增加的余量
     parkingCreepThreshold = 0.05; // 驻车状态下清除低速蠕动的水平速度阈值
 
@@ -39,7 +33,6 @@ export class VehicleSystem {
     private scratchPoint = new Cartesian3();
     private scratchLocal = new Cartesian3();
     private scratchForward = new Cartesian3();
-    private scratchUp = new Cartesian3();
     private scratchDown = new Cartesian3();
     private scratchDownEnu = new Cartesian3(0, 0, -1);
     private scratchRotation = new Matrix3();
@@ -115,7 +108,6 @@ export class VehicleSystem {
         const vel = nearest.chassisBody.linvel();
         if (Math.hypot(vel.x, vel.z) > 0.1) return;
         this.releaseParkingBrake(nearest);
-        this.stuckTimer = 0;
         this.active = nearest;
         const c = this.ctrl;
         c.controllerMode = 1;
@@ -136,7 +128,6 @@ export class VehicleSystem {
         if (!v) return;
 
         this.applyParkingBrake(v, c.getCurrentDelta() || 1 / 60);
-        this.stuckTimer = 0;
         this.findExitPosition(v, this.scratchPoint);
         this.getDriverForward(v, this.scratchForward);
         c.controllerMode = 0;
@@ -193,13 +184,13 @@ export class VehicleSystem {
         // 坡度补偿
         const rotation = chassisBody.rotation();
         const forward = this.rotateVectorByQuaternion(v.forwardLocal, rotation, this.scratchForward);
-        const slopeAngle = Math.asin(Math.max(-1, Math.min(1, forward.y)));
-        const factor = (slopeAngle < -0.05 && c.input.fwd) ? -Math.sin(slopeAngle) * 10 : 1;
+        const throttle = Number(c.input.fwd) - Number(c.input.bkd);
+        const sinTheta = Math.max(-1, Math.min(1, forward.y));
+        const extraAccel = (throttle * sinTheta > 0.05) ? Math.abs(sinTheta) * 9.81 : 0;
 
         // 驱动力
         const wheelCount = Math.max(1, vehicleController.numWheels());
-        const accelerateForce = chassisBody.mass() * v.acceleration / wheelCount;
-        const engineForce = (Number(c.input.fwd) - Number(c.input.bkd)) * accelerateForce * factor;
+        const engineForce = throttle * chassisBody.mass() * (v.acceleration + extraAccel) / wheelCount;
         for (let i = 0; i < vehicleController.numWheels(); i++) vehicleController.setWheelEngineForce(i, engineForce);
 
         // 制动
@@ -219,36 +210,18 @@ export class VehicleSystem {
         const driftFriction = ((c.input.rgt || c.input.lft) && c.input.shift) ? 0.5 : 2;
         vehicleController.setWheelSideFrictionStiffness(2, driftFriction);
         vehicleController.setWheelSideFrictionStiffness(3, driftFriction);
+    }
 
-        // 防卡死自动脱困：有油门却长时间几乎不动，沿行进方向施加向上+前向冲量顶离
-        const linv = chassisBody.linvel();
-        if ((c.input.fwd || c.input.bkd) && Math.hypot(linv.x, linv.z) < this.stuckSpeedThreshold) {
-            this.stuckTimer += delta;
-        } else {
-            this.stuckTimer = 0;
-        }
-        if (this.stuckTimer > this.stuckTimeThreshold) {
-            const g = 9.81;
-            const vUp = Math.sqrt(2 * g * v.size.h * this.stuckHopRatio); // 抬升到约车高×ratio 所需的起跳速度
-            const mass = chassisBody.mass();
-            const dir = c.input.bkd ? -1 : 1;
-            // 车身水平前向（局部 +X，与坡度补偿一致）
-            const fl = Math.hypot(forward.x, forward.z);
-            const fx = fl > 0.001 ? forward.x / fl : 0;
-            const fz = fl > 0.001 ? forward.z / fl : 0;
-            chassisBody.applyImpulse({ x: fx * dir * mass * vUp * 0.6, y: mass * vUp, z: fz * dir * mass * vUp * 0.6 }, true);
-            this.stuckTimer = 0;
-        }
-
-        // 翻车自动复位
-        const vehicleUp = this.rotateVectorByQuaternion({ x: 0, y: 1, z: 0 }, rotation, this.scratchUp);
-        if (vehicleUp.y < 0) {
-            const t = chassisBody.translation();
-            chassisBody.setTranslation({ x: t.x, y: t.y + v.size.h, z: t.z }, true);
-            chassisBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-            chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        }
+    // 翻车复位
+    resetUpright() {
+        const v = this.active;
+        if (!v || this.ctrl.controllerMode !== 1 || !this.RAPIER) return;
+        const { chassisBody } = v;
+        const t = chassisBody.translation();
+        chassisBody.setTranslation({ x: t.x, y: t.y + v.size.h, z: t.z }, true);
+        chassisBody.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+        chassisBody.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        chassisBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
 
     // 计算车身外侧的可用下车位置
@@ -358,7 +331,6 @@ export class VehicleSystem {
     stopActive() {
         if (this.active) {
             this.applyParkingBrake(this.active, this.ctrl.getCurrentDelta() || 1 / 60);
-            this.stuckTimer = 0;
         }
     }
 

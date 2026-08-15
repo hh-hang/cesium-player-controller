@@ -248,6 +248,7 @@ await player.loadVehicleModel({
 | `reset(pos?)` | Resets the character to a specified position or initial position. |
 | `switchPlayerModel(model)` | Switches the character model at runtime, retaining current position and orientation. |
 | `loadVehicleModel(opts)` | Loads a vehicle. Can be called multiple times for multiple vehicles. |
+| `resetVehicle()` | Reset the current vehicle upright. No-op when not driving. |
 | `changeView()` | Toggles between first/third-person view. |
 | `setFirstPersonCamera(vertAngle?)` | Directly enters first-person view, can specify initial vertical angle. |
 | `setFirstPersonCameraOffset(offset)` | Sets the first-person camera local offset at runtime in `[right, forward, up]` order. |

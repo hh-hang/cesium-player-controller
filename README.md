@@ -248,6 +248,7 @@ await player.loadVehicleModel({
 | `reset(pos?)` | 将角色重置到指定位置或初始位置。 |
 | `switchPlayerModel(model)` | 运行时切换角色模型，并保留当前位置和朝向。 |
 | `loadVehicleModel(opts)` | 加载车辆，可重复调用加载多辆车。 |
+| `resetVehicle()` | 将当前驾驶车辆翻正复位（未上车时无效）。 |
 | `changeView()` | 切换第一 / 第三人称视角。 |
 | `setFirstPersonCamera(vertAngle?)` | 直接进入第一人称，可指定初始垂直角度。 |
 | `setFirstPersonCameraOffset(offset)` | 运行时设置第一人称相机局部偏移，顺序为 `[右, 前, 上]`。 |
