@@ -88,6 +88,9 @@ export class PhysicsSystem {
 
     // 碰撞体登记
     private staticColliders: RAPIER.Collider[] = []; // 静态碰撞体
+    private terrainTileBodies = new Map<string, { body: RAPIER.RigidBody; collider: RAPIER.Collider }>();
+    /** 非流式静态碰撞 debug 线框版本号（glTF 等）。 */
+    staticDebugRevision = 0;
     private kinematicBodies = new Map<RAPIER.RigidBody, RAPIER.Collider>(); // 运动学刚体（移动平台）
     kinematicBySource = new Map<object, RAPIER.RigidBody>(); // 运动学刚体登记（按来源对象索引）
     activeKinematicSource: object | null = null; // 当前玩家站立的运动学碰撞源
@@ -283,31 +286,62 @@ export class PhysicsSystem {
         return this.frame.rapierToEcef(next.x, next.y, next.z, outEcef);
     }
 
-    // 仅静态碰撞体(地形/glTF 解析出的三角网)的调试线段 → ECEF。静态不动。
+    // 非流式静态碰撞体(glTF 等)的调试线段 → ECEF；流式地形瓦片由 per-tile debug 单独维护。
     buildStaticDebugLinesEcef(): Float64Array {
-        const meshes: { v: Float32Array; i: Uint32Array }[] = [];
+        const meshes: { v: Float32Array; i: Uint32Array; rotation: Matrix3; translation: Cartesian3 }[] = [];
         let triCount = 0;
         for (const col of this.staticColliders) {
+            if (this.isTerrainTileCollider(col)) continue;
             // trimesh 顶点/索引在 shape 上
             const shape = col.shape as { vertices?: Float32Array; indices?: Uint32Array };
             const v = shape.vertices, i = shape.indices;
             if (!v || !i || v.length === 0 || i.length === 0) continue;
-            meshes.push({ v, i });
+            const q = col.rotation();
+            const t = col.translation();
+            let worldRotation = new Quaternion(q.x, q.y, q.z, q.w);
+            let worldTranslation = new Cartesian3(t.x, t.y, t.z);
+            const parent = col.parent();
+            if (parent) {
+                const parentQ = parent.rotation();
+                const parentT = parent.translation();
+                const parentRotation = new Quaternion(parentQ.x, parentQ.y, parentQ.z, parentQ.w);
+                Matrix3.multiplyByVector(
+                    Matrix3.fromQuaternion(parentRotation, new Matrix3()),
+                    worldTranslation,
+                    worldTranslation,
+                );
+                worldTranslation.x += parentT.x;
+                worldTranslation.y += parentT.y;
+                worldTranslation.z += parentT.z;
+                worldRotation = Quaternion.multiply(parentRotation, worldRotation, worldRotation);
+            }
+            meshes.push({
+                v,
+                i,
+                rotation: Matrix3.fromQuaternion(worldRotation, new Matrix3()),
+                translation: worldTranslation,
+            });
             triCount += i.length / 3;
         }
         const out = new Float64Array(triCount * 18); // 每三角 3 边 × 2 点 × 3 坐标
         const c = new Cartesian3();
+        const local = new Cartesian3();
+        const world = new Cartesian3();
         let o = 0;
-        const emit = (v: Float32Array, a: number) => {
-            this.frame.rapierToEcef(v[a], v[a + 1], v[a + 2], c);
+        const emit = (mesh: typeof meshes[number], a: number) => {
+            Cartesian3.fromElements(mesh.v[a], mesh.v[a + 1], mesh.v[a + 2], local);
+            Matrix3.multiplyByVector(mesh.rotation, local, world);
+            Cartesian3.add(world, mesh.translation, world);
+            this.frame.rapierToEcef(world.x, world.y, world.z, c);
             out[o++] = c.x; out[o++] = c.y; out[o++] = c.z;
         };
-        for (const { v, i } of meshes) {
+        for (const mesh of meshes) {
+            const { i } = mesh;
             for (let t = 0; t < i.length; t += 3) {
                 const a = i[t] * 3, b = i[t + 1] * 3, d = i[t + 2] * 3;
-                emit(v, a); emit(v, b); // 边 AB
-                emit(v, b); emit(v, d); // 边 BC
-                emit(v, d); emit(v, a); // 边 CA
+                emit(mesh, a); emit(mesh, b); // 边 AB
+                emit(mesh, b); emit(mesh, d); // 边 BC
+                emit(mesh, d); emit(mesh, a); // 边 CA
             }
         }
         return out;
@@ -403,7 +437,7 @@ export class PhysicsSystem {
 
     // 胶囊线框 modelMatrix(每帧):enuToEcef · 平移(角色 ENU 位置),把局部几何摆到当前 ECEF 位置。
     getCapsuleModelMatrix(out = new Matrix4()): Matrix4 {
-        const t = this.charBody.translation(); // Rapier 空间胶囊中心
+        const t = this.charBody.nextTranslation();
         const enu = LocalFrame.rapierToEnu(t.x, t.y, t.z, this._capScratchEnu); // → ENU(Z-up)
         Matrix4.fromTranslation(enu, this._capScratchTrans);
         return Matrix4.multiply(this.frame.enuToEcef, this._capScratchTrans, out);
@@ -570,6 +604,7 @@ export class PhysicsSystem {
             if (!tri) continue;
             this.staticColliders.push(this.world.createCollider(this.triColliderDesc(tri, ig.static)));
         }
+        if (results.some((r) => r.status === "fulfilled" && r.value)) this.bumpStaticDebugRevision();
     }
 
     // 注册一个运动学(可移动平台)碰撞源,返回其刚体以便外部每帧驱动
@@ -612,6 +647,131 @@ export class PhysicsSystem {
         const pos = tri.positions instanceof Float32Array ? tri.positions : new Float32Array(tri.positions);
         const idx = tri.indices instanceof Uint32Array ? tri.indices : new Uint32Array(tri.indices);
         return r.ColliderDesc.trimesh(pos, idx).setCollisionGroups(group);
+    }
+
+    /** 静态碰撞 debug 几何变更时 bump，供上层按需重建线框。 */
+    private bumpStaticDebugRevision() {
+        this.staticDebugRevision++;
+    }
+
+    /** 是否为流式地形瓦片 collider。 */
+    private isTerrainTileCollider(col: RAPIER.Collider): boolean {
+        for (const entry of this.terrainTileBodies.values()) {
+            if (entry.collider === col) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 原子替换单个流式地形瓦片的碰撞体。
+     * 每个瓦片挂独立 fixed 刚体，便于 rebase 时整体变换。
+     */
+    addTerrainTileCollider(key: string, positions: Float32Array, indices: Uint32Array) {
+        this.removeTerrainTileCollider(key);
+        const body = this.world.createRigidBody(this.rapier.RigidBodyDesc.fixed());
+        const collider = this.world.createCollider(
+            this.triColliderDesc({ positions, indices }, ig.static),
+            body,
+        );
+        this.terrainTileBodies.set(key, { body, collider });
+        this.staticColliders.push(collider);
+    }
+
+    /** 按瓦片键移除流式地形碰撞体及其 fixed 刚体。 */
+    removeTerrainTileCollider(key: string) {
+        const entry = this.terrainTileBodies.get(key);
+        if (!entry) return;
+        this.terrainTileBodies.delete(key);
+        const index = this.staticColliders.indexOf(entry.collider);
+        if (index >= 0) this.staticColliders.splice(index, 1);
+        this.world.removeRigidBody(entry.body);
+    }
+
+    /** 清除全部流式地形瓦片碰撞体。 */
+    clearTerrainTileColliders() {
+        if (this.terrainTileBodies.size === 0) return;
+        for (const entry of this.terrainTileBodies.values()) {
+            const index = this.staticColliders.indexOf(entry.collider);
+            if (index >= 0) this.staticColliders.splice(index, 1);
+            this.world.removeRigidBody(entry.body);
+        }
+        this.terrainTileBodies.clear();
+    }
+
+    /**
+     * 将 Rapier 局部坐标系重锚到新的 ECEF 原点，同时保持所有物体在 ECEF 空间中位置不变。
+     * 用于全球漫游时缓解浮点精度与重力方向偏差。
+     */
+    rebase(newAnchorEcef: Cartesian3) {
+        const oldEnuToEcef = Matrix4.clone(this.frame.enuToEcef, new Matrix4());
+        this.frame.setAnchor(newAnchorEcef);
+
+        const oldEnu = new Cartesian3();
+        const ecef = new Cartesian3();
+        const newEnu = new Cartesian3();
+        // 点：旧 Rapier → 旧 ENU → ECEF → 新 Rapier
+        const point = (value: { x: number; y: number; z: number }) => {
+            LocalFrame.rapierToEnu(value.x, value.y, value.z, oldEnu);
+            Matrix4.multiplyByPoint(oldEnuToEcef, oldEnu, ecef);
+            return this.frame.ecefToRapier(ecef);
+        };
+        // 向量：旧 Rapier → 旧 ENU → ECEF → 新 ENU → 新 Rapier（只旋转不平移）
+        const vector = (value: { x: number; y: number; z: number }) => {
+            LocalFrame.rapierToEnu(value.x, value.y, value.z, oldEnu);
+            Matrix4.multiplyByPointAsVector(oldEnuToEcef, oldEnu, ecef);
+            this.frame.ecefVectorToEnu(ecef, newEnu);
+            return LocalFrame.enuToRapier(newEnu.x, newEnu.y, newEnu.z);
+        };
+
+        // 基向量变换矩阵，用于旋转四元数
+        const bx = vector({ x: 1, y: 0, z: 0 });
+        const by = vector({ x: 0, y: 1, z: 0 });
+        const bz = vector({ x: 0, y: 0, z: 1 });
+        const deltaMatrix = Matrix3.fromColumnMajorArray([
+            bx.x, bx.y, bx.z,
+            by.x, by.y, by.z,
+            bz.x, bz.y, bz.z,
+        ], new Matrix3());
+        const deltaRotation = Quaternion.fromRotationMatrix(deltaMatrix, new Quaternion());
+        const rotate = (value: { x: number; y: number; z: number; w: number }) => {
+            const q = Quaternion.multiply(deltaRotation, value as Quaternion, new Quaternion());
+            return { x: q.x, y: q.y, z: q.z, w: q.w };
+        };
+
+        // 遗留静态 collider 无 parent；流式地形瓦片挂在 fixed body 上，由 forEachRigidBody 处理
+        this.world.forEachCollider((collider) => {
+            if (collider.parent()) return;
+            collider.setTranslation(point(collider.translation()));
+            collider.setRotation(rotate(collider.rotation()));
+        });
+
+        this.world.forEachRigidBody((body) => {
+            const currentPosition = point(body.translation());
+            const currentRotation = rotate(body.rotation());
+            let nextPosition: ReturnType<typeof point> | undefined;
+            let nextRotation: ReturnType<typeof rotate> | undefined;
+            if (body.isKinematic()) {
+                nextPosition = point(body.nextTranslation());
+                nextRotation = rotate(body.nextRotation());
+            }
+            const linearVelocity = body.isDynamic() ? vector(body.linvel()) : undefined;
+            const angularVelocity = body.isDynamic() ? vector(body.angvel()) : undefined;
+
+            body.setTranslation(currentPosition, true);
+            body.setRotation(currentRotation, true);
+            if (linearVelocity) body.setLinvel(linearVelocity, true);
+            if (angularVelocity) body.setAngvel(angularVelocity, true);
+            if (nextPosition) body.setNextKinematicTranslation(nextPosition);
+            if (nextRotation) body.setNextKinematicRotation(nextRotation);
+        });
+
+        // 角色胶囊沿局部 -Y 重力，rebase 后保持竖直朝上
+        if (this.charBody) {
+            const identity = { x: 0, y: 0, z: 0, w: 1 };
+            this.charBody.setRotation(identity, true);
+            this.charBody.setNextKinematicRotation(identity);
+        }
+        this.onGround = false;
     }
 
     // 把碰撞源(gltf / terrain)统一解析成 Rapier 局部空间的三角网。
@@ -660,7 +820,7 @@ export class PhysicsSystem {
             local.x = src[i]; local.y = src[i + 1]; local.z = src[i + 2];
             Matrix4.multiplyByPoint(placement, local, ecef); // 局部 → ECEF
             const rp = this.frame.ecefToRapier(ecef); // ECEF → Rapier
-            out[i] = rp.x; out[i + 1] = rp.y; out[i + 2] = rp.z; 
+            out[i] = rp.x; out[i + 1] = rp.y; out[i + 2] = rp.z;
         }
         return { positions: out, indices: geo.indices };
     }
@@ -711,6 +871,7 @@ export class PhysicsSystem {
 
     // 销毁物理系统
     destroy() {
+        this.terrainTileBodies.clear();
         this.staticColliders = [];
         this.kinematicBodies.clear();
         this.physicsObjects = [];

@@ -1,6 +1,6 @@
 import {
     Cartesian3, Cesium3DTileset, PerspectiveFrustum, Viewer, Math as CMath, Cartographic, ShadowMode,
-    DirectionalLight, Transforms, Matrix4, Color, Entity,
+    DirectionalLight, Transforms, Matrix4, Color, Entity, Terrain,
     Primitive, GeometryInstance, BoxGeometry, CylinderGeometry, VertexFormat,
     ColorGeometryInstanceAttribute, PerInstanceColorAppearance, Model, Ion,
 } from "cesium";
@@ -135,6 +135,15 @@ async function makeFootballModel(scale: number): Promise<Model> {
 }
 
 async function main() {
+    // 加载地形
+    const terrain = Terrain.fromWorldTerrain();
+    viewer.scene.setTerrain(terrain);
+    await new Promise<void>((resolve) => {
+        if (terrain.ready) resolve();
+        else terrain.readyEvent.addEventListener(() => resolve());
+    });
+    viewer.scene.globe.depthTestAgainstTerrain = true;
+
     // 加载 3D Tiles
     const tileset = await Cesium3DTileset.fromUrl("https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json");
     tileset.shadows = ShadowMode.RECEIVE_ONLY; // 仅接收阴影
@@ -143,8 +152,8 @@ async function main() {
     // 中心点笛卡尔
     const center = tileset.boundingSphere.center.clone();
 
-    // 沿本地 U 方向下移 heightOffset
-    const heightOffset = -300;
+    // 沿本地 U 方向偏移
+    const heightOffset = -225;
     const enu = Transforms.eastNorthUpToFixedFrame(center, undefined, new Matrix4());
     const newCenter = Matrix4.multiplyByPoint(enu, new Cartesian3(0, 0, heightOffset), new Cartesian3());
 
@@ -154,12 +163,11 @@ async function main() {
 
     // 新中心经纬度
     const carto = Cartographic.fromCartesian(newCenter);
-    // 初始点
     const spawnLon = CMath.toDegrees(carto.longitude);
     const spawnLat = CMath.toDegrees(carto.latitude);
-    // const spawnHeight = carto.height + 20;
-    // const initPos = Cartesian3.fromDegrees(spawnLon, spawnLat, spawnHeight);
-    const initPos = new Cartesian3(1216376.1904561715, -4736210.644582202, 4081328.951494063);
+
+    // 出生点
+    const initPos = Cartesian3.fromDegrees(-75.59632310626372, 40.03923662898148, 90);
 
     // 生成地形碰撞范围
     const half = 0.006;
@@ -206,11 +214,23 @@ async function main() {
         },
         // 静态碰撞源
         staticCollider: [
-            // 地形碰撞
+            // // 地形碰撞
+            // {
+            //     type: "terrain",
+            //     rectangle: terrainRect,
+            //     resolution: 48,
+            // },
             {
-                type: "terrain",
-                rectangle: terrainRect,
-                resolution: 48,
+                type: "streaming-terrain",
+                level: 18,
+                radius: 350,
+                releaseRadius: 525,
+                lookAheadSeconds: 1,
+                fallbackDelayMs: 250,
+                maxConcurrentRequests: 2,
+                maxBuildsPerFrame: 1,
+                maxActiveTiles: 48,
+                rebaseDistance: 10_000,
             },
             // 模型碰撞
             {

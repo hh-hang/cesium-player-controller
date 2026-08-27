@@ -17,6 +17,8 @@ import { InputSystem } from "./systems/InputSystem";
 import { CameraSystem } from "./systems/CameraSystem";
 import { AnimationSystem } from "./systems/AnimationSystem";
 import { VehicleSystem } from "./systems/VehicleSystem";
+import { TerrainCollisionStreamer } from "./systems/TerrainCollisionStreamer";
+import { buildLocalFrameAxisEcef } from "./utils/debugGeometry";
 import type { PlayerControllerOptions, PlayerModelOptions, KeyMap, VehicleInstance, VehicleOptions } from "./types";
 
 function isMobileDevice() {
@@ -87,8 +89,15 @@ export class playerController {
 
     // ==================== 调试 ====================
     private displayCollider = false; // 显示场景碰撞体
-    private debugStaticPrimitive: any = null; // 静态碰撞体线框(地形/glTF),只建一次
-    private debugCapsulePrimitive: any = null; // 玩家胶囊线框,随角色每帧重建
+    private debugStaticPrimitive: any = null; // 非流式静态碰撞体线框(glTF)，初始化时建一次
+    private debugCapsulePrimitive: any = null; // 玩家胶囊线框,随角色每帧更新 matrix
+    /** ENU 局部系三轴 debug：E 红 / N 绿 / U 蓝，锚点随 frame.anchor 更新。 */
+    private debugLocalFrameAxes: Partial<Record<"e" | "n" | "u", Primitive>> = {};
+    private debugLocalFrameAxisLength = 0;
+    private debugLocalFrameAnchor = new Cartesian3(Number.NaN, Number.NaN, Number.NaN);
+    private debugTerrainPrimitives = new Map<string, Primitive>(); // 流式地形瓦片 debug，按瓦片增量增删
+    private pendingTerrainDebugLines = new Map<string, Float64Array>(); // collider 就绪时缓存的 debug 线段
+    private lastStaticDebugRevision = -1; // 已反映到 debugStaticPrimitive 的 revision
 
     // ==================== 动态物体 ====================
     private dynamicObjects: DynamicObject[] = []; // 受物理模拟、可被角色推动的物体
@@ -100,6 +109,8 @@ export class playerController {
     cam = new CameraSystem(this); // 相机系统
     animation = new AnimationSystem(this); // 动画系统
     vehicle = new VehicleSystem(this); // 载具系统
+    private terrainCollisionStreamers: TerrainCollisionStreamer[] = []; // 全球地形 mesh 流式碰撞管理器
+    private physicsRebaseDistance = Number.POSITIVE_INFINITY; // Rapier 重锚水平距离阈值（米）
 
     // ==================== 初始化 ====================
     async init(opts: PlayerControllerOptions, callback?: () => void) {
@@ -171,12 +182,40 @@ export class playerController {
             autostepMaxHeight: 40 * s,
         });
 
-        // 构建静态碰撞体
-        if (opts.staticCollider) await this.physics.addStaticColliders(this.viewer, opts.staticCollider);
+        // 先加载普通静态碰撞体，再启动 Cesium 真实地形 mesh 流式碰撞
+        if (opts.staticCollider) {
+            const list = Array.isArray(opts.staticCollider) ? opts.staticCollider : [opts.staticCollider];
+            const ordinary = list.filter((source) => source.type !== "streaming-terrain");
+            if (ordinary.length) await this.physics.addStaticColliders(this.viewer, ordinary);
+            for (const source of list) {
+                if (source.type !== "streaming-terrain") continue;
+                if (this.terrainCollisionStreamers.length > 0) {
+                    console.warn("仅支持一个 streaming-terrain 碰撞源，已跳过多余配置");
+                    continue;
+                }
+                const streamer = new TerrainCollisionStreamer(this.viewer, this.physics, source, {
+                    onTileDebugAdd: (key, linesEcef) => this.addTerrainDebugTile(key, linesEcef),
+                    onTileDebugRemove: (key) => this.removeTerrainDebugTile(key),
+                    onTileDebugClear: () => this.clearTerrainDebugTiles(),
+                });
+                this.terrainCollisionStreamers.push(streamer);
+                // 取所有流式源中最小的 rebase 距离作为全局阈值
+                this.physicsRebaseDistance = Math.min(this.physicsRebaseDistance, streamer.rebaseDistance);
+                streamer.start();
+                // 同步构建出生点脚下瓦片，避免初始化完成前穿地
+                await streamer.prime(this.posEcef);
+            }
+        }
         // 初始化时注册动态碰撞体
         if (opts.kinematicCollider) {
             const list = Array.isArray(opts.kinematicCollider) ? opts.kinematicCollider : [opts.kinematicCollider];
-            for (const d of list) await this.physics.addKinematicCollider(this.viewer, d);
+            for (const d of list) {
+                if (d.type === "streaming-terrain") {
+                    console.warn("streaming-terrain 仅可在 staticCollider 中使用，已跳过该 kinematic 配置");
+                    continue;
+                }
+                await this.physics.addKinematicCollider(this.viewer, d);
+            }
         }
 
         // 加载玩家模型
@@ -254,6 +293,7 @@ export class playerController {
         }
         delta = Math.min(delta, 1 / 30) * this.timeScale;
         this.currentDelta = delta;
+        this.updateTerrainCollision();
         this.vehicle.preparePhysics(delta);
         if (this.controllerMode === 1) {
             this.physics.step(delta);
@@ -264,7 +304,10 @@ export class playerController {
             this.vehicle.finishPhysics(delta);
             this.animation.update(delta);
             this.cam.update(delta);
-            if (this.displayCollider) this.updateCapsuleDebug();
+            if (this.displayCollider) {
+                this.updateLocalFrameDebug();
+                this.updateCapsuleDebug();
+            }
         } else {
             this.updatePlayer(delta);
             this.vehicle.finishPhysics(delta);
@@ -418,7 +461,11 @@ export class playerController {
         this.cam.update(delta);
 
         // 刷新调试线框
-        if (this.displayCollider) { this.updateCapsuleDebug(); this.updateDynamicDebug(); }
+        if (this.displayCollider) {
+            this.updateLocalFrameDebug();
+            this.updateCapsuleDebug();
+            this.updateDynamicDebug();
+        }
 
         // 移动端车辆按钮检测
         if (this.isShowMobileControls && this.vehicle.list.length) {
@@ -430,6 +477,34 @@ export class playerController {
                 this._isNearVehicle = near;
                 this.mobileControls?.syncVehicleBtn(near);
             }
+        }
+    }
+
+    /**
+     * 每帧更新流式地形碰撞：检测 Rapier rebase、驱动瓦片加载/卸载。
+     * 步行以玩家 ECEF 为中心；驾车以底盘位置与线速度为中心。
+     */
+    private updateTerrainCollision() {
+        if (this.terrainCollisionStreamers.length === 0) return;
+        let center = this.posEcef;
+        if (this.controllerMode === 1 && this.vehicle.active) {
+            center = this.vehicle.getPosition(this.vehicle.active, new Cartesian3());
+        }
+        // 水平位移超过阈值时重锚 Rapier 局部系，避免远距离浮点误差
+        const local = this.frame.ecefToLocal(center, new Cartesian3());
+        if (Math.hypot(local.x, local.y) >= this.physicsRebaseDistance) {
+            this.physics.rebase(center);
+            for (const streamer of this.terrainCollisionStreamers) streamer.refreshAfterRebase();
+            this.setOnGround(false);
+        }
+        let velocity = { e: this.velE, n: this.velN, u: this.velU };
+        if (this.controllerMode === 1 && this.vehicle.active) {
+            const bodyVelocity = this.vehicle.active.chassisBody.linvel();
+            const enuVelocity = LocalFrame.rapierToEnu(bodyVelocity.x, bodyVelocity.y, bodyVelocity.z);
+            velocity = { e: enuVelocity.x, n: enuVelocity.y, u: enuVelocity.z };
+        }
+        for (const streamer of this.terrainCollisionStreamers) {
+            streamer.update(center, velocity);
         }
     }
 
@@ -500,15 +575,85 @@ export class playerController {
             this.removeDebugPrimitives();
             return;
         }
-        // 静态碰撞体
-        if (!this.debugStaticPrimitive && this.physics.world) {
-            const ecef = this.physics.buildStaticDebugLinesEcef();
-            this.debugStaticPrimitive = this.makeLinePrimitive(ecef, Color.fromCssColorString("#4a90d9"));
-            if (this.debugStaticPrimitive) this.viewer.scene.primitives.add(this.debugStaticPrimitive);
-        }
+        // 非流式静态 + 流式地形 + 胶囊
+        this.rebuildStaticDebugIfNeeded();
+        this.flushPendingTerrainDebug();
+        this.syncTerrainDebugFromStreamers();
+        this.updateLocalFrameDebug();
         this.updateCapsuleDebug();
         if (this.controllerMode === 0) this.updateDynamicDebug();
         else for (const o of this.dynamicObjects) this.removeDynamicDebug(o);
+    }
+
+    /** 非流式静态碰撞体 debug：仅在 glTF 等加载完成且 revision 变化时重建。 */
+    private rebuildStaticDebugIfNeeded() {
+        if (!this.displayCollider || !this.physics.world) return;
+        if (this.physics.staticDebugRevision === this.lastStaticDebugRevision && this.debugStaticPrimitive) return;
+        this.lastStaticDebugRevision = this.physics.staticDebugRevision;
+        if (this.debugStaticPrimitive) {
+            this.viewer.scene.primitives.remove(this.debugStaticPrimitive);
+            this.debugStaticPrimitive = null;
+        }
+        const ecef = this.physics.buildStaticDebugLinesEcef();
+        if (ecef.length >= 6) {
+            this.debugStaticPrimitive = this.makeLinePrimitive(ecef, Color.fromCssColorString("#4a90d9"));
+            if (this.debugStaticPrimitive) this.viewer.scene.primitives.add(this.debugStaticPrimitive);
+        }
+    }
+
+    /** debug 打开时为所有已就绪的流式地形瓦片补建线框。 */
+    private syncTerrainDebugFromStreamers() {
+        if (!this.displayCollider) return;
+        for (const streamer of this.terrainCollisionStreamers) streamer.syncDebugTiles();
+    }
+
+    /** 将 pending 中尚未显示的地形 debug 线段创建为 Primitive。 */
+    private flushPendingTerrainDebug() {
+        if (!this.displayCollider) return;
+        for (const [key, lines] of this.pendingTerrainDebugLines) {
+            if (!this.debugTerrainPrimitives.has(key)) this.createTerrainDebugPrimitive(key, lines);
+        }
+    }
+
+    /** 创建单块地形瓦片的 debug Primitive（不写入 pending）。 */
+    private createTerrainDebugPrimitive(key: string, linesEcef: Float64Array) {
+        this.removeTerrainDebugPrimitive(key);
+        const primitive = this.makeLinePrimitive(linesEcef, Color.fromCssColorString("#4a90d9"));
+        if (!primitive) return;
+        this.debugTerrainPrimitives.set(key, primitive);
+        this.viewer.scene.primitives.add(primitive);
+    }
+
+    /** 仅移除场景中的地形 debug Primitive，保留 pending 缓存。 */
+    private removeTerrainDebugPrimitive(key: string) {
+        const primitive = this.debugTerrainPrimitives.get(key);
+        if (!primitive) return;
+        this.viewer.scene.primitives.remove(primitive);
+        this.debugTerrainPrimitives.delete(key);
+    }
+
+    /** 隐藏全部地形 debug Primitive。 */
+    private hideTerrainDebugPrimitives() {
+        for (const key of [...this.debugTerrainPrimitives.keys()]) this.removeTerrainDebugPrimitive(key);
+    }
+
+    /** 增量添加单块地形瓦片 debug：始终缓存线段，debug 开启时再创建 Primitive。 */
+    private addTerrainDebugTile(key: string, linesEcef: Float64Array) {
+        if (linesEcef.length < 6) return;
+        this.pendingTerrainDebugLines.set(key, linesEcef);
+        if (!this.displayCollider) return;
+        this.createTerrainDebugPrimitive(key, linesEcef);
+    }
+
+    /** 瓦片 collider 卸载时移除对应 debug 缓存与 Primitive。 */
+    private removeTerrainDebugTile(key: string) {
+        this.pendingTerrainDebugLines.delete(key);
+        this.removeTerrainDebugPrimitive(key);
+    }
+
+    /** 清除全部流式地形 debug（含 pending，用于 provider 切换或销毁）。 */
+    private clearTerrainDebugTiles() {
+        for (const key of [...this.pendingTerrainDebugLines.keys()]) this.removeTerrainDebugTile(key);
     }
 
     // 动态物体碰撞线框：几何只建一次（本体局部空间），每帧由物理位姿驱动 modelMatrix。
@@ -532,6 +677,55 @@ export class playerController {
         }
     }
 
+    /** 局部 ENU 坐标轴显示长度（米），随胶囊尺寸缩放。 */
+    private getLocalFrameAxisLength(): number {
+        return Math.max(300, this.capsuleInfo.height * 5);
+    }
+
+    /** 绘制 Rapier/物理使用的 ENU 局部系：锚点为 frame.anchor，E/N/U 三色轴。 */
+    private updateLocalFrameDebug() {
+        if (!this.displayCollider) return;
+        const length = this.getLocalFrameAxisLength();
+        const anchorMoved = !Cartesian3.equals(this.frame.anchor, this.debugLocalFrameAnchor);
+        if (length !== this.debugLocalFrameAxisLength || anchorMoved) {
+            this.removeLocalFrameDebug();
+            this.debugLocalFrameAxisLength = length;
+            Cartesian3.clone(this.frame.anchor, this.debugLocalFrameAnchor);
+        }
+        const axes = [
+            { key: "e" as const, color: Color.RED },
+            { key: "n" as const, color: Color.LIME },
+            { key: "u" as const, color: Color.BLUE },
+        ];
+        for (const { key, color } of axes) {
+            if (!this.debugLocalFrameAxes[key]) {
+                const ecef = buildLocalFrameAxisEcef(
+                    this.frame.anchor,
+                    (local, out) => this.frame.localToEcef(local, out),
+                    length,
+                    key,
+                );
+                const primitive = this.makeLinePrimitive(ecef, color);
+                if (primitive) {
+                    this.viewer.scene.primitives.add(primitive);
+                    this.debugLocalFrameAxes[key] = primitive;
+                }
+            }
+        }
+    }
+
+    /** 移除局部坐标系 debug 轴。 */
+    private removeLocalFrameDebug() {
+        for (const key of ["e", "n", "u"] as const) {
+            const primitive = this.debugLocalFrameAxes[key];
+            if (!primitive) continue;
+            this.viewer.scene.primitives.remove(primitive);
+            delete this.debugLocalFrameAxes[key];
+        }
+        this.debugLocalFrameAxisLength = 0;
+        this.debugLocalFrameAnchor.x = Number.NaN;
+    }
+
     // 胶囊线框:几何只建一次(ENU 局部空间),每帧只更新 modelMatrix 跟随角色(不重建、不重传 GPU)
     private updateCapsuleDebug() {
         if (!this.displayCollider || !this.physics.world) return;
@@ -553,6 +747,9 @@ export class playerController {
                 this[key] = null;
             }
         }
+        this.hideTerrainDebugPrimitives();
+        this.removeLocalFrameDebug();
+        this.lastStaticDebugRevision = -1;
         // 动态物体各自的碰撞线框
         for (const o of this.dynamicObjects) this.removeDynamicDebug(o);
     }
@@ -915,6 +1112,11 @@ export class playerController {
     // --- 销毁 ---
     destroy() {
         this.input.unbindEvents();
+
+        // 销毁地形碰撞体
+        for (const streamer of this.terrainCollisionStreamers) streamer.destroy();
+        this.terrainCollisionStreamers = [];
+        this.physicsRebaseDistance = Number.POSITIVE_INFINITY;
 
         // 销毁移动端控件
         this.mobileControls?.destroy();

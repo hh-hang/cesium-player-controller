@@ -25,9 +25,35 @@ export type TerrainCollider = {
     resolution?: number;
 };
 
+// 流式地形碰撞体
+export type StreamingTerrainCollider = {
+    type: "streaming-terrain";
+    /** 物理用地形四叉树层级。默认 16。 */
+    level?: number;
+    /** 预测玩家位置周围需加载碰撞的半径（米）。默认 350。 */
+    radius?: number;
+    /** 已加载瓦片保留到此半径外才卸载（米，滞回）。默认 radius * 1.5。 */
+    releaseRadius?: number;
+    /** 速度前瞻秒数，用于预加载前方瓦片。默认 1.0。 */
+    lookAheadSeconds?: number;
+    /** 等待 Cesium 自身加载后再发起缺失瓦片兜底请求的延迟（毫秒）。默认 250。 */
+    fallbackDelayMs?: number;
+    /** 同时进行的最大兜底地形请求数。默认 2。 */
+    maxConcurrentRequests?: number;
+    /** 单次 update 内最多创建的 Rapier trimesh 数量。默认 1。 */
+    maxBuildsPerFrame?: number;
+    /** 同时活跃的最大瓦片数（极区瓦片变窄时重要）。默认 48。 */
+    maxActiveTiles?: number;
+    /** 适配器缓存的已解码 Cesium TerrainMesh 上限。默认 64。 */
+    maxCachedMeshes?: number;
+    /** 水平移动超过此距离后重锚 Rapier 局部世界（米）。默认 10000。 */
+    rebaseDistance?: number;
+};
+
 export type ColliderSource =
     | GltfCollider
-    | TerrainCollider;
+    | TerrainCollider
+    | StreamingTerrainCollider;
 
 // ==================== 动态物体形状  ====================
 // 受物理模拟、可被角色推动的动态物体的几何
