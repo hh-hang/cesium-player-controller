@@ -2,14 +2,14 @@
 
 # cesium-player-controller
 
-> **注意：** 由于 CesiumJS 无法通过 CPU 直接获取 3D Tiles 的顶点坐标，您可以使用 [collider-forge](https://github.com/hh-hang/collider-forge) 工具来制作碰撞体。
+> **注意：** `streaming-terrain` 用于 Cesium 地球地形，不用于 3D Tiles。由于 CesiumJS 无法通过 CPU 直接获取 3D Tiles 的顶点坐标，3D Tiles 场景仍可使用 [collider-forge](https://github.com/hh-hang/collider-forge) 制作 glTF / GLB 碰撞体。
 
 [![NPM Package][npm]][npm-url]
 [![Github][github]][github-url]
 [![X][x]][x-url]
 [![Three.js](https://img.shields.io/badge/Three.js-player_controller-blue)](https://github.com/hh-hang/three-player-controller)
 
-基于 CesiumJS 的玩家控制器，开箱即用，提供人物胶囊体碰撞、动画、第一 / 第三人称切换、相机避障。
+基于 CesiumJS 的玩家控制器，开箱即用，提供人物胶囊体碰撞、Cesium 地形流式碰撞、动画、车辆驾驶、第一 / 第三人称切换和相机避障。
 
 # 示例
 
@@ -149,11 +149,19 @@ await player.init({
 
     // 静态碰撞源
     staticCollider: [
-        // 地形碰撞
+        // Cesium 地形流式碰撞（大范围移动时推荐）
         {
-            type: "terrain",
-            rectangle: [west, south, east, north], // 弧度
-            resolution: 64,
+            type: "streaming-terrain",
+            level: 16,
+            radius: 350,
+            releaseRadius: 525,
+            lookAheadSeconds: 1,
+            fallbackDelayMs: 250,
+            maxConcurrentRequests: 2,
+            maxBuildsPerFrame: 1,
+            maxActiveTiles: 48,
+            maxCachedMeshes: 64,
+            rebaseDistance: 10_000,
         },
         // 模型碰撞
         {
@@ -190,8 +198,8 @@ await player.init({
         backward: ["KeyS", "ArrowDown"],     // 后退
         left: ["KeyA", "ArrowLeft"],         // 左移
         right: ["KeyD", "ArrowRight"],       // 右移
-        sprint: ["ShiftLeft", "ShiftRight"], // 冲刺
-        jump: ["Space"],                     // 跳跃
+        sprint: ["ShiftLeft", "ShiftRight"], // 人物冲刺；车辆转向时为后轮手刹
+        jump: ["Space"],                     // 人物跳跃；车辆模式下制动
         toggleView: ["KeyV"],                // 切换视角
         toggleFly: ["KeyF"],                 // 切换飞行模式
         toggleVehicle: ["KeyE"],             // 上 / 下车
@@ -213,6 +221,21 @@ await player.init({
 });
 ```
 
+#### 流式地形碰撞
+
+`streaming-terrain` 复用 Cesium 已加载的真实地形 mesh，并在玩家或当前车辆周围动态创建、卸载 Rapier 碰撞体。它会按速度预加载前方瓦片，在 Cesium 未及时提供 mesh 时发起限流的兜底请求，并在长距离移动后重锚 Rapier 局部坐标系以保持精度。
+
+```ts
+staticCollider: {
+    type: "streaming-terrain",
+    // 所有字段均可选；下表列出默认值
+}
+```
+
+- 仅可放在 `staticCollider` 中，且每个控制器只支持一个 `streaming-terrain` 源。
+- 无需配置固定 `rectangle`；如果只在小范围活动，仍可使用 `type: "terrain"` 和 `rectangle` 一次性采样高度地形。
+- `level` 越高瓦片越精细，但请求、内存和碰撞网格成本也会增加；建议根据地形数据的实际精度调整。
+
 #### `loadVehicleModel()`
 
 ```ts
@@ -225,7 +248,7 @@ await player.loadVehicleModel({
 
     // 可选
     scale: 0.9,                                // 车辆模型缩放，默认 1
-    driverSeatRotation: 0,                     // 驾驶位水平旋转（弧度），默认 0
+    driverSeatRotation: 0,                     // 驾驶位相对底盘局部坐标的水平旋转（弧度），默认 0
     chassisRatio: 0.2,                         // 底盘高度比例，默认 0.2
     suspensionRestLengthRatio: 0.2,            // 悬挂静止长度比例，默认 0.2
     followVehicleDirection: true,              // 驾驶时镜头跟随车辆朝向，默认 true
@@ -233,6 +256,14 @@ await player.loadVehicleModel({
     maxSpeed: 300,                             // 最高速度基准值（km/h），会按 scale 缩放，默认 300
     acceleration: 8,                           // 加速度基准值（m/s²），会按 scale 缩放，默认 8
     deceleration: 8,                           // 制动减速度基准值（m/s²），会按 scale 缩放，默认 8
+});
+```
+
+车辆模式下，`W` / `S` 控制前进和倒车，`A` / `D` 转向，`Space` 制动，转向时按住 `Shift` 可使用后轮手刹。翻车后不会自动复位；`resetVehicle()` 未内置默认键，可按需绑定：
+
+```ts
+window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyR" && !event.repeat) player.resetVehicle();
 });
 ```
 
@@ -337,7 +368,7 @@ viewer.scene.primitives.remove(sphere);
 | `setThirdMouseMode(v)` | 设置第三人称鼠标模式：`0 | 1 | 2 | 3 | 4 | 5`。 |
 | `setEnableZoom(v)` | 设置是否允许镜头缩放。 |
 | `setOverShoulderView(v)` | 开关过肩视角偏移。 |
-| `setDebug(v)` | 开关碰撞体调试显示。 |
+| `setDebug(v)` | 开关碰撞体调试显示；流式地形模式下会同步显示已加载瓦片和 ENU 局部坐标轴（E 红 / N 绿 / U 蓝）。 |
 | `setEnableToward(v)` | 开关鼠标驱动的朝向 / 视角更新。 |
 
 ### 输入监听
@@ -357,8 +388,8 @@ player.onAllEvent();  // 重新开启键盘和鼠标输入监听
 | `backward` | `S` / `ArrowDown` | 后退 |
 | `left` | `A` / `ArrowLeft` | 左移 |
 | `right` | `D` / `ArrowRight` | 右移 |
-| `sprint` | `Shift` | 冲刺 |
-| `jump` | `Space` | 跳跃 |
+| `sprint` | `Shift` | 人物冲刺；车辆转向时使用后轮手刹 |
+| `jump` | `Space` | 人物跳跃；车辆制动 |
 | `toggleView` | `V` | 切换视角 |
 | `toggleFly` | `F` | 切换飞行模式 |
 | `toggleVehicle` | `E` | 上车 / 下车 |
@@ -403,8 +434,8 @@ player.setInput({
     moveY: number,         // 纵向移动轴，范围 -1～1
     lookDeltaX: number,   // 视角水平增量，通常来自 mousemove 的 movementX
     lookDeltaY: number,   // 视角垂直增量，通常来自 mousemove 的 movementY
-    jump: boolean,        // 跳跃，持续状态；飞行时控制上升
-    shift: boolean,       // 冲刺/加速，持续状态
+    jump: boolean,        // 跳跃，持续状态；飞行时控制上升，车辆模式下制动
+    shift: boolean,       // 冲刺/加速，持续状态；车辆转向时为后轮手刹
     toggleView: boolean,  // 触发式，传 true 切换第一/第三人称视角
     toggleFly: boolean,   // 触发式，传 true 切换飞行模式
     toggleVehicle: boolean, // 触发式，传 true 上车 / 下车
@@ -480,7 +511,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `playerModelConfig` | `PlayerModelOptions` | 是 | - | 角色模型与参数配置。 |
 | `initPos` | `Cartesian3` | 是 | - | 初始出生点（ECEF）。 |
 | `staticCollider` | `ColliderSource \| ColliderSource[]` | 否 | - | 静态碰撞体来源；不传则仅使用基础贴地检测。 |
-| `kinematicCollider` | `ColliderSource \| ColliderSource[]` | 否 | - | 初始化时注册的运动学碰撞体。 |
+| `kinematicCollider` | `ColliderSource \| ColliderSource[]` | 否 | - | 初始化时注册的运动学碰撞体；不支持 `streaming-terrain`。 |
 | `mouseSensitivity` | `number` | 否 | `5` | 鼠标灵敏度。 |
 | `minCamDistance` | `number` | 否 | `100` | 第三人称最小镜头距离。 |
 | `maxCamDistance` | `number` | 否 | `440` | 第三人称最大镜头距离。 |
@@ -534,7 +565,23 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | 类型 | 字段 | 说明 |
 | --- | --- | --- |
 | `terrain` | `rectangle`, `resolution?` | Cesium 地形碰撞源，`rectangle` 为 `[west, south, east, north]` 弧度。 |
+| `streaming-terrain` | 全部字段可选 | 跟随玩家或车辆动态流式加载 Cesium 真实地形 mesh；仅支持 `staticCollider`。 |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB 碰撞源。 |
+
+### `StreamingTerrainCollider`
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `level` | `number` | `16` | 物理地形的四叉树层级。 |
+| `radius` | `number` | `350` | 预测位置周围需加载碰撞的半径（米）。 |
+| `releaseRadius` | `number` | `radius * 1.5` | 已加载瓦片的卸载半径（米），不小于 `radius`。 |
+| `lookAheadSeconds` | `number` | `1` | 按当前速度预加载前方地形的时间（秒）。 |
+| `fallbackDelayMs` | `number` | `250` | 等待 Cesium 自身加载后再发起兜底请求的延迟（毫秒）。 |
+| `maxConcurrentRequests` | `number` | `2` | 最大并发兜底地形请求数。 |
+| `maxBuildsPerFrame` | `number` | `1` | 每次 `update()` 最多创建的 Rapier trimesh 数量。 |
+| `maxActiveTiles` | `number` | `48` | 同时活跃的最大瓦片数。 |
+| `maxCachedMeshes` | `number` | `64` | 适配器缓存的已解码 Cesium TerrainMesh 上限。 |
+| `rebaseDistance` | `number` | `10000` | 触发 Rapier 局部世界重锚的水平移动距离（米，最小 `100`）。 |
 
 ### `VehicleOptions`
 
@@ -545,7 +592,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // 朝向 / 视角输入更新时
 | `wheelsNames` | `string[]` | 是 | - | 车轮节点名数组，顺序为左前、右前、左后、右后。 |
 | `scale` | `number` | 否 | `1` | 车辆模型缩放。 |
 | `driverSeatPosition` | `Cartesian3` | 是 | - | 驾驶位胶囊中心，车辆底盘局部坐标。 |
-| `driverSeatRotation` | `number` | 否 | `0` | 驾驶位相对车辆前向的水平旋转（弧度）。 |
+| `driverSeatRotation` | `number` | 否 | `0` | 驾驶位相对车辆底盘局部坐标的水平旋转（弧度）。 |
 | `chassisRatio` | `number` | 否 | `0.2` | 底盘高度比例。 |
 | `suspensionRestLengthRatio` | `number` | 否 | `0.2` | 悬挂静止长度比例。 |
 | `followVehicleDirection` | `boolean` | 否 | `true` | 驾驶时镜头是否跟随车辆朝向。 |

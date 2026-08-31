@@ -2,14 +2,14 @@ English | [中文](README.md)
 
 # cesium-player-controller
 
-> **Note:** Since CesiumJS cannot directly access 3D Tiles vertex coordinates via CPU, you can use the [collider-forge](https://github.com/hh-hang/collider-forge) tool to create colliders.
+> **Note:** `streaming-terrain` targets Cesium globe terrain, not 3D Tiles. Because CesiumJS cannot directly expose 3D Tiles vertex coordinates to the CPU, 3D Tiles scenes can still use [collider-forge](https://github.com/hh-hang/collider-forge) to create glTF / GLB colliders.
 
 [![NPM Package][npm]][npm-url]
 [![Github][github]][github-url]
 [![X][x]][x-url]
 [![Three.js](https://img.shields.io/badge/Three.js-player_controller-blue)](https://github.com/hh-hang/three-player-controller)
 
-An out-of-the-box player controller for CesiumJS, providing character capsule collision, animations, first/third-person view switching, and camera collision avoidance.
+An out-of-the-box player controller for CesiumJS with character capsule collision, streaming Cesium terrain collision, animations, vehicle driving, first/third-person view switching, and camera collision avoidance.
 
 # Example
 
@@ -149,11 +149,19 @@ await player.init({
 
     // Static collider source
     staticCollider: [
-        // Terrain collision
+        // Streaming Cesium terrain collision (recommended for large traversal areas)
         {
-            type: "terrain",
-            rectangle: [west, south, east, north], // Radians
-            resolution: 64,
+            type: "streaming-terrain",
+            level: 16,
+            radius: 350,
+            releaseRadius: 525,
+            lookAheadSeconds: 1,
+            fallbackDelayMs: 250,
+            maxConcurrentRequests: 2,
+            maxBuildsPerFrame: 1,
+            maxActiveTiles: 48,
+            maxCachedMeshes: 64,
+            rebaseDistance: 10_000,
         },
         // Model collision
         {
@@ -190,8 +198,8 @@ await player.init({
         backward: ["KeyS", "ArrowDown"],     // Move backward
         left: ["KeyA", "ArrowLeft"],         // Move left
         right: ["KeyD", "ArrowRight"],       // Move right
-        sprint: ["ShiftLeft", "ShiftRight"], // Sprint
-        jump: ["Space"],                     // Jump
+        sprint: ["ShiftLeft", "ShiftRight"], // Character sprint; rear handbrake while steering a vehicle
+        jump: ["Space"],                     // Character jump; vehicle brake
         toggleView: ["KeyV"],                // Toggle view (first/third person)
         toggleFly: ["KeyF"],                 // Toggle flight mode
         toggleVehicle: ["KeyE"],             // Enter / exit vehicle
@@ -213,6 +221,21 @@ await player.init({
 });
 ```
 
+#### Streaming Terrain Collision
+
+`streaming-terrain` reuses real terrain meshes already loaded by Cesium and dynamically creates and removes Rapier colliders around the player or active vehicle. It preloads tiles ahead based on velocity, makes rate-limited fallback requests when Cesium does not provide a mesh in time, and rebases the local Rapier world after long-distance travel to preserve precision.
+
+```ts
+staticCollider: {
+    type: "streaming-terrain",
+    // Every field is optional; defaults are listed below.
+}
+```
+
+- It is supported only in `staticCollider`, with at most one `streaming-terrain` source per controller.
+- No fixed `rectangle` is needed. For a small, fixed play area, you can still use `type: "terrain"` with a `rectangle` to sample a height mesh once.
+- Higher `level` values provide finer tiles but increase request, memory, and collision-mesh costs. Match the value to the actual resolution of your terrain data.
+
 #### `loadVehicleModel()`
 
 ```ts
@@ -225,7 +248,7 @@ await player.loadVehicleModel({
 
     // Optional
     scale: 0.9,                                // Vehicle model scale, default 1
-    driverSeatRotation: 0,                     // Driver-seat horizontal rotation (radians), default 0
+    driverSeatRotation: 0,                     // Horizontal rotation in chassis-local coordinates (radians), default 0
     chassisRatio: 0.2,                         // Chassis height ratio, default 0.2
     suspensionRestLengthRatio: 0.2,            // Suspension rest length ratio, default 0.2
     followVehicleDirection: true,              // Camera follows vehicle direction while driving, default true
@@ -233,6 +256,14 @@ await player.loadVehicleModel({
     maxSpeed: 300,                             // Top speed base value (km/h), scaled by 'scale', default 300
     acceleration: 8,                           // Acceleration base value (m/s²), scaled by 'scale', default 8
     deceleration: 8,                           // Braking deceleration base value (m/s²), scaled by 'scale', default 8
+});
+```
+
+In vehicle mode, `W` / `S` drive forward and reverse, `A` / `D` steer, `Space` brakes, and holding `Shift` while steering applies the rear-wheel handbrake. Flipped vehicles no longer reset automatically; `resetVehicle()` has no built-in default key, so bind it as needed:
+
+```ts
+window.addEventListener("keydown", (event) => {
+    if (event.code === "KeyR" && !event.repeat) player.resetVehicle();
 });
 ```
 
@@ -248,7 +279,7 @@ await player.loadVehicleModel({
 | `reset(pos?)` | Resets the character to a specified position or initial position. |
 | `switchPlayerModel(model)` | Switches the character model at runtime, retaining current position and orientation. |
 | `loadVehicleModel(opts)` | Loads a vehicle. Can be called multiple times for multiple vehicles. |
-| `resetVehicle()` | Reset the current vehicle upright. No-op when not driving. |
+| `resetVehicle()` | Resets the current vehicle upright. No-op when not driving. |
 | `changeView()` | Toggles between first/third-person view. |
 | `setFirstPersonCamera(vertAngle?)` | Directly enters first-person view, can specify initial vertical angle. |
 | `setFirstPersonCameraOffset(offset)` | Sets the first-person camera local offset at runtime in `[right, forward, up]` order. |
@@ -337,7 +368,7 @@ viewer.scene.primitives.remove(sphere);
 | `setThirdMouseMode(v)` | Sets third-person mouse mode: `0 | 1 | 2 | 3 | 4 | 5`. |
 | `setEnableZoom(v)` | Sets whether to allow camera zoom. |
 | `setOverShoulderView(v)` | Toggles over-the-shoulder view offset. |
-| `setDebug(v)` | Toggles collider debug display. |
+| `setDebug(v)` | Toggles collider debug display; streaming-terrain mode also displays loaded tiles and the local ENU axes (E red / N green / U blue). |
 | `setEnableToward(v)` | Toggles mouse-driven orientation/view updates. |
 
 ### Input Listening
@@ -357,8 +388,8 @@ player.onAllEvent();  // Re-enables keyboard and mouse input listening
 | `backward` | `S` / `ArrowDown` | Move backward |
 | `left` | `A` / `ArrowLeft` | Move left |
 | `right` | `D` / `ArrowRight` | Move right |
-| `sprint` | `Shift` | Sprint |
-| `jump` | `Space` | Jump |
+| `sprint` | `Shift` | Character sprint; rear-wheel handbrake while steering a vehicle |
+| `jump` | `Space` | Character jump; vehicle brake |
 | `toggleView` | `V` | Toggle view |
 | `toggleFly` | `F` | Toggle flight mode |
 | `toggleVehicle` | `E` | Enter / exit vehicle |
@@ -403,8 +434,8 @@ player.setInput({
     moveY: number,         // Vertical movement axis, range -1..1
     lookDeltaX: number,   // View horizontal increment, usually from mousemove's movementX
     lookDeltaY: number,   // View vertical increment, usually from mousemove's movementY
-    jump: boolean,        // Jump, continuous state; controls ascent when flying
-    shift: boolean,       // Sprint/accelerate, continuous state
+    jump: boolean,        // Jump, continuous state; ascent while flying, brake in vehicle mode
+    shift: boolean,       // Sprint/accelerate, continuous state; rear handbrake while steering a vehicle
     toggleView: boolean,  // Triggered, pass true to toggle first/third-person view
     toggleFly: boolean,   // Triggered, pass true to toggle flight mode
     toggleVehicle: boolean, // Triggered, pass true to enter / exit vehicle
@@ -480,7 +511,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `playerModelConfig` | `PlayerModelOptions` | Yes | - | Character model and parameter configuration. |
 | `initPos` | `Cartesian3` | Yes | - | Initial spawn point (ECEF). |
 | `staticCollider` | `ColliderSource \| ColliderSource[]` | No | - | Static collider source; if not provided, only uses basic ground detection. |
-| `kinematicCollider` | `ColliderSource \| ColliderSource[]` | No | - | Kinematic colliders (movable platforms) registered during initialization. |
+| `kinematicCollider` | `ColliderSource \| ColliderSource[]` | No | - | Kinematic colliders (movable platforms) registered during initialization; `streaming-terrain` is not supported. |
 | `mouseSensitivity` | `number` | No | `5` | Mouse sensitivity. |
 | `minCamDistance` | `number` | No | `100` | Third-person minimum camera distance. |
 | `maxCamDistance` | `number` | No | `440` | Third-person maximum camera distance. |
@@ -534,7 +565,23 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | Type | Fields | Description |
 | --- | --- | --- |
 | `terrain` | `rectangle`, `resolution?` | Cesium terrain collider source, `rectangle` is `[west, south, east, north]` in radians. |
+| `streaming-terrain` | All fields optional | Dynamically streams real Cesium terrain meshes around the player or vehicle; supported only in `staticCollider`. |
 | `gltf` | `url`, `position?`, `rotation?`, `scale?`, `modelMatrix?` | glTF / GLB collider source. |
+
+### `StreamingTerrainCollider`
+
+| Field | Type | Default Value | Description |
+| --- | --- | --- | --- |
+| `level` | `number` | `16` | Quadtree level used for the physics terrain. |
+| `radius` | `number` | `350` | Collision loading radius around the predicted position, in meters. |
+| `releaseRadius` | `number` | `radius * 1.5` | Radius beyond which loaded tiles are released, in meters; never less than `radius`. |
+| `lookAheadSeconds` | `number` | `1` | Time horizon used to preload terrain along the current velocity, in seconds. |
+| `fallbackDelayMs` | `number` | `250` | Delay before requesting a missing tile after waiting for Cesium's own loader, in milliseconds. |
+| `maxConcurrentRequests` | `number` | `2` | Maximum number of concurrent fallback terrain requests. |
+| `maxBuildsPerFrame` | `number` | `1` | Maximum Rapier trimeshes created during one `update()` call. |
+| `maxActiveTiles` | `number` | `48` | Maximum number of simultaneously active tiles. |
+| `maxCachedMeshes` | `number` | `64` | Maximum number of decoded Cesium TerrainMeshes cached by the adapter. |
+| `rebaseDistance` | `number` | `10000` | Horizontal travel distance that triggers a local Rapier-world rebase, in meters (minimum `100`). |
 
 ### `VehicleOptions`
 
@@ -545,7 +592,7 @@ player.onTowardChange = (dx, dy, speed) => {}; // Triggered when orientation/vie
 | `wheelsNames` | `string[]` | Yes | - | Wheel node names in order: front-left, front-right, rear-left, rear-right. |
 | `scale` | `number` | No | `1` | Vehicle model scale. |
 | `driverSeatPosition` | `Cartesian3` | Yes | - | Driver-seat capsule center in chassis-local coordinates. |
-| `driverSeatRotation` | `number` | No | `0` | Horizontal driver-seat rotation relative to vehicle forward (radians). |
+| `driverSeatRotation` | `number` | No | `0` | Horizontal driver-seat rotation in vehicle chassis-local coordinates (radians). |
 | `chassisRatio` | `number` | No | `0.2` | Chassis height ratio. |
 | `suspensionRestLengthRatio` | `number` | No | `0.2` | Suspension rest length ratio. |
 | `followVehicleDirection` | `boolean` | No | `true` | Whether the camera follows the vehicle direction while driving. |
