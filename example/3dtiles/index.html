@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>3D Tiles · cesium-player-controller</title>
-    <link rel="stylesheet" href="/hud.css" />
+    <link rel="stylesheet" href="../styles/common.css" />
 </head>
 <body>
     <div id="cesiumContainer"></div>
@@ -28,37 +28,94 @@
         </span>
     </div>
 
-    <div class="hud" role="note" aria-label="Controls">
-        <div class="row hint-group">
-            <span class="hint-text">Movement:</span>
-            <kbd>W</kbd>
-            <kbd>A</kbd>
-            <kbd>S</kbd>
-            <kbd>D</kbd>
+    <div class="hud" data-hint-mode="on-foot" role="note" aria-label="Controls">
+        <div class="hint-set" data-for="on-foot">
+            <div class="hint-move">
+                <div class="hint-cluster">
+                    <div class="wasd">
+                        <kbd class="wasd-w">W</kbd>
+                        <kbd class="wasd-a">A</kbd>
+                        <kbd class="wasd-s">S</kbd>
+                        <kbd class="wasd-d">D</kbd>
+                    </div>
+                    <span class="hint-text">Move</span>
+                </div>
+                <div class="hint-cluster">
+                    <div class="hint-mouse" aria-hidden="true">
+                        <div class="hint-mouse-body">
+                            <span class="hint-mouse-wheel"></span>
+                            <span class="hint-mouse-nub"></span>
+                        </div>
+                    </div>
+                    <span class="hint-text">Look</span>
+                </div>
+            </div>
+            <div class="hint-actions">
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Shift</kbd></span>
+                    <span class="hint-text">Sprint</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Space</kbd></span>
+                    <span class="hint-text">Jump</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>E</kbd></span>
+                    <span class="hint-text">Enter</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>V</kbd></span>
+                    <span class="hint-text">Toggle View</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>F</kbd></span>
+                    <span class="hint-text">Toggle Fly</span>
+                </div>
+            </div>
         </div>
-        <div class="row hint-group">
-            <span class="hint-text">Boost / Drift:</span>
-            <kbd>Shift</kbd>
-        </div>
-        <div class="row hint-group">
-            <span class="hint-text">Jump / Ascend:</span>
-            <kbd>Space</kbd>
-        </div>
-        <div class="row hint-group">
-            <span class="hint-text">Toggle View:</span>
-            <kbd>V</kbd>
-        </div>
-        <div class="row hint-group">
-            <span class="hint-text">Toggle Fly Mode:</span>
-            <kbd>F</kbd>
-        </div>
-        <div class="row hint-group">
-            <span class="hint-text">Enter / Exit Vehicle:</span>
-            <kbd>E</kbd>
-        </div>
-        <div class="row hint-group">
-            <span class="hint-text">Reset Vehicle:</span>
-            <kbd>R</kbd>
+        <div class="hint-set" data-for="vehicle">
+            <div class="hint-move">
+                <div class="hint-cluster">
+                    <div class="wasd">
+                        <kbd class="wasd-w">W</kbd>
+                        <kbd class="wasd-a">A</kbd>
+                        <kbd class="wasd-s">S</kbd>
+                        <kbd class="wasd-d">D</kbd>
+                    </div>
+                    <span class="hint-text">Drive</span>
+                </div>
+                <div class="hint-cluster">
+                    <div class="hint-mouse" aria-hidden="true">
+                        <div class="hint-mouse-body">
+                            <span class="hint-mouse-wheel"></span>
+                            <span class="hint-mouse-nub"></span>
+                        </div>
+                    </div>
+                    <span class="hint-text">Look</span>
+                </div>
+            </div>
+            <div class="hint-actions">
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Shift</kbd></span>
+                    <span class="hint-text">Drift</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>Space</kbd></span>
+                    <span class="hint-text">Brake</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>E</kbd></span>
+                    <span class="hint-text">Exit</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>V</kbd></span>
+                    <span class="hint-text">Toggle View</span>
+                </div>
+                <div class="hint-group">
+                    <span class="hint-keys"><kbd>R</kbd></span>
+                    <span class="hint-text">Reset Vehicle</span>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -66,6 +123,7 @@
         <img src="/imgs/source.svg" alt="" />
     </a>
 
+    <script type="module" src="../control-hints.ts"></script>
     <script type="module" src="./index.ts"></script>
 </body>
 </html>

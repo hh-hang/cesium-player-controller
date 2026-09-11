@@ -7,6 +7,7 @@ import {
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { playerController } from "cesium-player-controller";
 import { GUI } from "lil-gui";
+import { bindVehicleHintMode } from "../control-hints";
 
 Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5ZDJjMmUxZC1mZjNmLTRiNTItODkxZC02ZmUxMWYwZjFmYmEiLCJpZCI6MjIzMDk3LCJpYXQiOjE3MTg3Njc3NDR9.u83SkUcP9A9SvN3549bduETewavU8k_lSBQneyz5M0Q";
 
@@ -328,6 +329,9 @@ async function main() {
         player.setFirstPersonCameraOffset([0, 0, 0]);
         player.cam.springCameraTime = 0.07;
     };
+
+    // 上下车切换 HUD 提示（包装现有回调）
+    bindVehicleHintMode(player);
 
     // 准星射线交点可视化小球
     const raycastSphere = viewer.entities.add(new Entity({
