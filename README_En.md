@@ -29,7 +29,7 @@ npm install
 npm run dev
 ```
 
-Access `http://localhost:5173/cesium-player-controller/` in your browser.
+Access `http://localhost:5173/` in your browser.
 
 # Usage
 

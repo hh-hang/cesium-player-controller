@@ -29,7 +29,7 @@ npm install
 npm run dev
 ```
 
-浏览器访问 `http://localhost:5173/cesium-player-controller/`。
+浏览器访问 `http://localhost:5173/`。
 
 # 使用
 
