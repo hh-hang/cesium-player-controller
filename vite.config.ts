@@ -1,7 +1,7 @@
 import { cpSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 
 const cesiumSource = path.resolve(__dirname, "node_modules/cesium/Build/Cesium");
 const cesiumPublic = path.resolve(__dirname, "example/public/cesium");
@@ -39,29 +39,34 @@ function copyCesium(): Plugin {
     };
 }
 
-export default defineConfig({
-    base: "/cesium-player-controller/",
-    root: path.resolve(__dirname, "example"),
-    plugins: [copyCesium()],
-    define: {
-        CESIUM_BASE_URL: JSON.stringify("/cesium-player-controller/cesium/"),
-    },
-    server: { host: true },
-    resolve: {
-        alias: {
-            "cesium-player-controller": path.resolve(__dirname, "src/index.ts"),
+export default defineConfig(({ mode }) => {
+    const base = loadEnv(mode, __dirname, "VITE_").VITE_BASE_URL || "/";
+
+    return {
+        base,
+        envDir: __dirname,
+        root: path.resolve(__dirname, "example"),
+        plugins: [copyCesium()],
+        define: {
+            CESIUM_BASE_URL: JSON.stringify(`${base}cesium/`),
         },
-    },
-    build: {
-        outDir: "../docs",
-        emptyOutDir: true,
-        rollupOptions: {
-            input: {
-                main: path.resolve(__dirname, "example", "index.html"),
-                "3dtiles": path.resolve(__dirname, "example", "3dtiles", "index.html"),
-                "3dgs": path.resolve(__dirname, "example", "3dgs", "index.html"),
-                "gltf": path.resolve(__dirname, "example", "gltf", "index.html"),
+        server: { host: true },
+        resolve: {
+            alias: {
+                "cesium-player-controller": path.resolve(__dirname, "src/index.ts"),
             },
         },
-    },
+        build: {
+            outDir: "../docs",
+            emptyOutDir: true,
+            rollupOptions: {
+                input: {
+                    main: path.resolve(__dirname, "example", "index.html"),
+                    "3dtiles": path.resolve(__dirname, "example", "3dtiles", "index.html"),
+                    "3dgs": path.resolve(__dirname, "example", "3dgs", "index.html"),
+                    "gltf": path.resolve(__dirname, "example", "gltf", "index.html"),
+                },
+            },
+        },
+    };
 });
